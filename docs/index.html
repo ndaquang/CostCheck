@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Đơn giá BOQ</title>
+<link rel="stylesheet" href="assets/app.css?v=7">
+<link rel="stylesheet" href="assets/dash.css?v=7">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="shared/gate.css">
+<link rel="stylesheet" href="shared/secure-ui.css">
+</head>
+<body>
+<div id="splash">
+  <div class="splash-box">
+    <div class="logo">ĐG</div>
+    <div id="splash-msg">Đang nạp dữ liệu đơn giá…</div>
+    <div class="bar"><span></span></div>
+    <div class="muted small" id="splash-err"></div>
+  </div>
+</div>
+
+<header class="top">
+  <div class="brand">
+    <div class="logo">ĐG</div>
+    <div>
+      <div class="title">Đơn giá BOQ</div>
+      <div class="sub" id="db-meta"></div>
+    </div>
+  </div>
+  <div class="searchwrap">
+    <svg class="sicon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
+    <input id="q" type="search" autocomplete="off" spellcheck="false"
+      placeholder="Tìm công việc… vd: be tong lot mong, cot thep cot, tran thach cao  ( / để tìm nhanh)">
+    <button id="help-btn" class="ghost" title="Cú pháp tìm kiếm">?</button>
+  </div>
+  <nav class="topnav">
+    <a href="#" data-sec="tra-cuu" class="on">Tra cứu</a>
+    <a href="#" data-sec="diem-roi">Điểm rơi giá</a>
+    <a href="#" data-sec="phan-tich">Phân tích</a>
+    <a href="index.html?ds=doithu" class="nav-dt" title="Đơn giá đối thủ — dữ liệu riêng, chỉ admin">Đối thủ</a>
+  </nav>
+  <div id="help" class="help" hidden>
+    <b>Cách dùng</b>
+    <ul>
+      <li>Kết quả gom theo <b>nhóm đại diện</b> (các cách ghi tên khác nhau của cùng công việc). Bấm ▸ để mở từng báo giá.</li>
+      <li>Đơn giá đại diện = trung vị đã quy về mặt bằng 2026; khoảng phổ biến = P25–P75.</li>
+      <li>Gõ có dấu hay không dấu đều được, sai chính tả nhẹ vẫn tìm ra. Loại trừ từ: <code>son -lot</code> · cụm chính xác: <code>"cot thep"</code></li>
+      <li>Phím <code>/</code> để vào ô tìm, <code>Esc</code> để xóa.</li>
+    </ul>
+  </div>
+</header>
+
+<!-- ===== Mục 1: Tra cứu ===== -->
+<section id="sec-search" class="layout">
+  <aside id="side">
+    <div class="side-head">
+      <b>Bộ lọc</b>
+      <button id="clear-all" class="link">Xóa tất cả</button>
+      <button id="side-close" class="ghost only-mobile">✕</button>
+    </div>
+    <div id="facets"></div>
+    <details class="adv" id="adv">
+      <summary>Bộ lọc nâng cao <span class="badge" id="adv-badge" hidden></span></summary>
+      <div class="opt-block">
+        <label class="chk"><input type="checkbox" id="opt-par"> Tìm cả trong “Hạng mục cha”</label>
+        <label class="chk"><input type="checkbox" id="opt-split"> Chỉ dòng tách VL / NC</label>
+        <label class="chk"><input type="checkbox" id="opt-nowarn"> Ẩn dòng giá bất thường</label>
+      </div>
+      <details class="facet" open>
+        <summary>Đơn giá gốc</summary>
+        <div class="range">
+          <input id="pmin" inputmode="numeric" placeholder="Từ">
+          <span>–</span>
+          <input id="pmax" inputmode="numeric" placeholder="Đến">
+        </div>
+      </details>
+      <div id="facets-adv"></div>
+    </details>
+  </aside>
+
+  <main>
+    <div class="toolbar">
+      <button id="side-open" class="btn only-mobile">Bộ lọc</button>
+      <div id="count" class="count"></div>
+      <div class="spacer"></div>
+      <select id="sort" title="Sắp xếp">
+        <option value="rel">Liên quan nhất</option>
+        <option value="proj">Nhiều dự án nhất</option>
+        <option value="new">Báo giá mới nhất</option>
+        <option value="pasc">Đơn giá tăng dần</option>
+        <option value="pdesc">Đơn giá giảm dần</option>
+      </select>
+      <button id="export" class="btn" title="Xuất Excel: sheet TONG_HOP (nhóm) + CHI_TIET (từng báo giá, có nút +/−)">Xuất Excel</button>
+    </div>
+    <div id="chips" class="chips"></div>
+    <div id="notice" class="notice" hidden></div>
+    <div id="quick" class="quick"></div>
+    <div id="results"></div>
+  </main>
+</section>
+
+<!-- ===== Mục 2: Điểm rơi giá ===== -->
+<section id="sec-drop" hidden>
+  <main class="dash">
+    <h2>Điểm rơi đơn giá</h2>
+    <p class="intro">Chọn một nhóm công việc để xem giá phổ biến nằm ở đâu, thay đổi theo thời gian và khác nhau theo tỉnh/loại hình.</p>
+    <div class="ctrl"><input type="search" id="dp-q" placeholder="Tìm nhóm công việc… vd: bê tông lót móng"></div>
+    <div class="small muted" id="dp-list-h"></div>
+    <div id="dp-list" class="dp-list"></div>
+    <div id="dp-view"></div>
+  </main>
+</section>
+
+<!-- ===== Mục 3: Phân tích ===== -->
+<section id="sec-analysis" hidden>
+  <nav class="tabs" id="tabs">
+    <button data-tab="overview" class="on">Tổng quan</button>
+    <button data-tab="index">Chỉ số giá</button>
+    <button data-tab="factors">Tỉnh &amp; loại hình</button>
+    <button data-tab="labour">Vật liệu – nhân công</button>
+    <button data-tab="mc">Mô phỏng chi phí</button>
+    <button data-tab="cluster">Phân cụm dự án</button>
+    <button data-tab="articles">Bài phân tích</button>
+    <button data-tab="tech">Báo cáo kỹ thuật</button>
+  </nav>
+  <div class="sub an-meta" id="an-meta"></div>
+  <main class="dash" id="view"><div class="empty">Đang nạp kết quả phân tích…</div></main>
+</section>
+
+<div id="drawer-bg" hidden></div>
+<aside id="drawer" hidden>
+  <div class="drawer-head">
+    <div id="drawer-title"></div>
+    <button id="drawer-close" class="ghost">✕</button>
+  </div>
+  <div id="drawer-body"></div>
+</aside>
+<div id="tip" hidden></div>
+<div id="toast" hidden></div>
+
+<script src="shared/crypto-web.js"></script>
+<script src="shared/secure.js" data-build="admin" data-scripts="shared/secure-ui.js,assets/xlsx-lite.js?v=7,assets/charts.js?v=7,assets/dash.js?v=7,assets/app.js?v=7"></script>
+</body>
+</html>

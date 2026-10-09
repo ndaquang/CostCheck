@@ -1,0 +1,15 @@
+/* Lớp bảo vệ trong phần mềm */
+#watermark { position: fixed; inset: 0; z-index: 9999; pointer-events: none; opacity: .09; background-repeat: repeat; }
+@media (prefers-color-scheme: dark) { #watermark { opacity: .13; } }
+.userbox { display: flex; align-items: center; gap: 8px; margin-left: 8px; }
+.userbox .who { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.userbox .who i { font-style: normal; font-weight: 500; font-size: 11px; color: var(--muted); background: var(--surface-2); border-radius: 8px; padding: 1px 7px; margin-left: 4px; }
+.userbox .btn { height: 30px; font-size: 13px; }
+
+/* Nhân viên: chỉ tra cứu, không xuất, không sao chép */
+.role-staff [data-sec="diem-roi"], .role-staff [data-sec="phan-tich"], .role-staff #export,
+.role-staff .nav-dt, .role-staff [data-drop], .role-staff [data-act], .role-staff .actions { display: none !important; }
+.role-staff body, .role-staff #results, .role-staff #drawer { -webkit-user-select: none; user-select: none; }
+.role-staff input, .role-staff textarea { -webkit-user-select: text; user-select: text; }
+@media print { .role-staff body, .no-print body { display: none !important; } }
+@media (max-width: 900px) { .userbox .who { display: none; } }
