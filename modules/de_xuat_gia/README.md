@@ -101,7 +101,7 @@ Chạy trên một file BOQ bất kỳ (BOQ thật):
 node modules/de_xuat_gia/demo/chay_file.js --boq <file.xlsx> [--baseline <file.xlsx>] [--db <db.js>] [--out <thư mục>]
 ```
 
-Mặc định so với CSDL giả lập. Muốn có giá tham khảo thật thì truyền `--db` là CSDL thật dạng `window.DB = {...}`, hoặc dùng trang web với gói `.dgbw`.
+Kết quả gồm file BOQ đã thêm sheet `TK_*` và báo cáo `KET_QUA.xlsx` (sheet Tóm tắt, Đọc file, Chi tiết). Mặc định so với CSDL giả lập. Muốn có giá tham khảo thật thì truyền `--db` là CSDL thật dạng `window.DB = {...}`, hoặc dùng trang web với gói `.dgbw`.
 
 ### Các mẫu BOQ thật đã xử lý
 - Dòng có chữ "Ghi chú" ở cột Đơn vị, đoạn thuyết minh dài, dòng "......" được bỏ qua: không phải hạng mục, cũng không phải tiêu đề.

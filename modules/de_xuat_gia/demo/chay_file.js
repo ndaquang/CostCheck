@@ -96,6 +96,9 @@ const md = s => String(s ?? '').replace(/\|/g, '/').replace(/\s+/g, ' ').trim();
   rows.forEach((r, k) => o.push(`| ${md(r.sheet)} | ${r.dong} | ${md(r.ma)} | ${md(r.mo_ta)}${r.near ? ` _(${md(r.near)})_` : ''} | ${md(r.dv)} | ${fq(r.kl)} | ${md(names[k] || '—')} | ${FIT[r.phu_hop] || ''} | ${r.ref ? f0(r.ref.p50) : ''} | ${r.ref ? f0(r.ref.p25) + ' – ' + f0(r.ref.p75) : ''} | ${f0(r.qs)} | ${LBL[r.danh_gia]} | ${md(r.luu_y)} |`));
   fs.writeFileSync(path.join(OUT, 'KET_QUA.md'), o.join('\n') + '\n');
   fs.writeFileSync(path.join(OUT, 'ket_qua.json'), JSON.stringify({ cauTruc, rows: rows.map((r, k) => ({ ...r, nhom: names[k] })), fmt, tRead, tMatch, tExport }, null, 1));
+  // Báo cáo dạng Excel
+  execFileSync('python3', [path.join(__dirname, 'bao_cao_xlsx.py'), path.join(OUT, 'ket_qua.json'), path.join(OUT, 'KET_QUA.xlsx'), path.basename(BOQ),
+    DBJS ? '' : 'Giá tham khảo lấy từ CSDL GIẢ LẬP của bộ chạy thử (~500 báo giá / 40 nhóm công việc) — chỉ minh họa cách module chạy, không phải giá thị trường thật.']);
   console.log(o.slice(0, 20 + cauTruc.length).join('\n'));
   if (errs.length) { console.error('LỖI TRANG:', errs); process.exitCode = 1; }
   console.log(`\nKết quả: ${OUT}`);
