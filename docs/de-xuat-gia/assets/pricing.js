@@ -20,7 +20,20 @@
   }
   // Từ quá phổ biến trong mô tả BOQ, ít giá trị phân biệt
   const STOP = new Set('va cua cho cac bang theo trong voi la tai tu den gom bao gom loai bao the khi duoc co mot nhung hoac de tren duoi vao ra cong tac thi cong lap dat cung cap the and of the for to in with by on at or including incl supply install a an as per all'.split(' '));
-  const tokens = s => norm(s).split(' ').filter(t => t && !STOP.has(t));
+  // Cấp độ bền bê tông (TCVN 5574) → mác tương đương, để "B20" khớp "M250"
+  const B2M = { '7.5': 100, '10': 150, '12.5': 150, '15': 200, '20': 250, '22.5': 300, '25': 350, '27.5': 350, '30': 400, '35': 450, '40': 500 };
+  function concreteClass(s) {
+    const t = String(s);
+    if (!/b[eê]\s*t[oô]ng|\bbt\b|concrete/i.test(t.normalize('NFC'))) return t;
+    return t.replace(/\bB\s?(7[.,]5|10|12[.,]5|15|20|22[.,]5|25|27[.,]5|30|35|40)\b/gi, (m, x) => `M${B2M[x.replace(',', '.')]}`);
+  }
+  const tokens = s => norm(concreteClass(s)).split(' ').filter(t => t && !STOP.has(t));
+  // Thông số có tiền tố: mác M300, đường kính D10, cấp độ bền B20, thép CB300 → { m: Set(300), d: Set(10) }
+  function attrNums(tk) {
+    const out = {};
+    for (let k = 1; k < tk.length; k++) if (/^\d/.test(tk[k]) && /^(m|d|b|cb|phi)$/.test(tk[k - 1])) (out[tk[k - 1]] = out[tk[k - 1]] || new Set()).add(tk[k]);
+    return out;
+  }
 
   /* ---------- Đơn vị ---------- */
   const UNIT_ALIAS = [
@@ -31,7 +44,7 @@
     ['tan', /^(tan|t|ton|tons|tonne)$/],
     ['cai', /^(cai|chiec|cay|thanh|tam|vien|pcs|pc|no|nos|ea|each|unit|units|qua|con|so)$/],
     ['bo', /^(bo|set|sets|cum|ht|he thong|system)$/],
-    ['ls', /^(ls|l s|lot|tron goi|goi|tg|lump sum|item|khoan|cong trinh|ct)$/],
+    ['ls', /^(ls|l s|lot|tron goi|goi|tg|lump sum|item|khoan|cong trinh|ct|toan bo|tb|hang muc)$/],
     ['diem', /^(diem|point|pt|vi tri)$/],
     ['lit', /^(lit|l|lit)$/],
     ['cong', /^(cong|ngay cong|manday|md cong)$/],
@@ -118,6 +131,7 @@
       for (const [t, c] of cntSpec) w.set(t, Math.max(w.get(t) || 0, 0.25 * c / ns));
       g.big = new Set([...g.repBig, ...[...big].filter(([, c]) => c / ns >= 0.3).map(([b]) => b)]);
       g.nums = new Set(rep.filter(t => /^\d/.test(t)));
+      g.attr = attrNums(rep);
       g.tw = w;
       for (const [t, v] of w) { let a = post.get(t); if (!a) post.set(t, a = []); a.push(g.id, v); }
     }
@@ -170,10 +184,14 @@
     const limit = opt.limit || 8;
     const qMain = tokens(line.desc);
     const qSet = new Set(qMain);
-    const qCtx = [...new Set(tokens(line.ctx))].filter(t => !qSet.has(t));
+    // Mô tả ngắn ("Móng", "Sàn tầng 1"): tiêu đề gần nhất ("BÊ TÔNG LÓT B10") là một phần nội dung chính
+    const short = qMain.length <= 4;
+    const qNear = short ? [...new Set(tokens(line.near))].filter(t => !qSet.has(t)) : [];
+    const nearSet = new Set(qNear);
+    const qCtx = [...new Set(tokens(line.ctx))].filter(t => !qSet.has(t) && !nearSet.has(t));
     // từ hiếm trước: chúng sinh ứng viên; từ quá phổ biến chỉ cộng điểm cho ứng viên đã có
     const plen = t => expandTok(IX, t).reduce((n, [v]) => n + IX.post.get(v).length / 2, 0);
-    const q = [...[...qSet].sort((a, b) => plen(a) - plen(b)).map(t => [t, 1]), ...qCtx.map(t => [t, 0.3])];
+    const q = [...[...qSet, ...qNear].sort((a, b) => plen(a) - plen(b)).map(t => [t, nearSet.has(t) ? 0.6 : 1]), ...qCtx.map(t => [t, 0.3])];
     if (!qMain.length) return [];
     // Cộng điểm bằng mảng số (nhanh với CSDL lớn); từ ngữ cảnh chỉ cộng thêm cho nhóm đã khớp mô tả
     const NG = IX.groups.length;
@@ -181,7 +199,7 @@
     const touched = [];
     let denom = 0;
     for (const [t, qw] of q) {
-      const exp = expandTok(IX, t), isCtx = qw < 1;
+      const exp = expandTok(IX, t), isCtx = qw < 0.5;
       let id = 0; for (const [v] of exp) id = Math.max(id, IX.idf.get(v) || 0);
       denom += (exp.length ? id : Math.log(1 + IX.NG)) * qw;
       const tt = [];
@@ -212,8 +230,10 @@
     for (const gid of touched) acc[gid] = 0;
     cand.sort((x, y) => y[1] - x[1]); cand = cand.slice(0, 300);
     const qAll = new Set(q.map(([t]) => t));
-    const qBig = []; for (let k = 1; k < qMain.length; k++) qBig.push(qMain[k - 1] + ' ' + qMain[k]);
-    const qNums = new Set(qMain.filter(t => /^\d/.test(t)));
+    const qBig = [];
+    for (const seq of [qMain, short ? tokens(line.near) : []]) for (let k = 1; k < seq.length; k++) qBig.push(seq[k - 1] + ' ' + seq[k]);
+    const qNums = new Set([...qMain, ...qNear].filter(t => /^\d/.test(t)));
+    const qAttr = attrNums(tokens(line.desc).concat(short ? ['|'] : [], short ? tokens(line.near) : []));
     const out = [];
     for (const [gid, raw] of cand) {
       const g = IX.groups[gid];
@@ -225,11 +245,22 @@
       let pi = 0; for (const t of g.repSet) if (qAll.has(t)) pi += IX.idf.get(t) || 0;
       const prec = Math.min(1, pi / g.repIdf);
       let score = cover * (0.7 + 0.3 * prec);
+      // Ưu tiên nhóm chứa đủ các từ của chính mô tả dòng ("Dầm" dưới tiêu đề "CỐT THÉP…" → cốt thép DẦM)
+      if (qSet.size) {
+        let mh = 0;
+        for (const t of qSet) if (expandTok(IX, t).some(([v]) => g.tw.has(v))) mh++;
+        score *= 0.8 + 0.2 * mh / qSet.size;
+      }
       // Số hiệu khác nhau (M250 vs M300, D10 vs D16, dày 100 vs 200) → phạt
       if (qNums.size && g.nums.size) {
         let conflict = 0; for (const t of g.nums) if (!qNums.has(t)) conflict++;
         let same = 0; for (const t of qNums) if (g.nums.has(t)) same++;
         if (conflict && !same) score *= Math.pow(0.82, Math.min(conflict, 2));
+      }
+      // Cùng loại thông số nhưng khác giá trị (M150 vs M300, D10 vs D18) → phạt mạnh
+      for (const [k, vs] of Object.entries(qAttr)) {
+        const gv = g.attr[k];
+        if (gv && ![...vs].some(v => gv.has(v))) score *= 0.7;
       }
       const ratio = line.unit ? unitRatio(g.unit, line.unit) : null;
       const unitOk = !line.unit ? null : ratio !== null;
@@ -357,7 +388,10 @@
       }
       const total = (score.desc ? 3 : 0) + (score.unit ? 2 : 0) + (score.qty ? 2 : 0) + (score.rate ? 1.5 : 0) + (score.amount ? 1 : 0) + (score.code ? 0.5 : 0);
       if (score.desc && (score.unit || score.qty) && (!best || total > best.total)) {
-        const twoRow = next.some((v, c) => typeof v === 'string' && Object.keys(COLS).some(k => headerScore(v, k) >= 2) && !(typeof row[c] === 'number'));
+        // tiêu đề 2 dòng: dòng kế là tiêu đề song ngữ, hoặc dòng con ngắn ("Mời thầu / Dự thầu", "Vật liệu / Nhân công")
+        const nextVals = next.filter(v => v !== null && v !== undefined && v !== '');
+        const twoRow = next.some((v, c) => typeof v === 'string' && Object.keys(COLS).some(k => headerScore(v, k) >= 2) && !(typeof row[c] === 'number'))
+          || (nextVals.length > 0 && nextVals.every(v => typeof v === 'string' && v.trim().length <= 30) && !next[cols.desc]);
         best = { headerRow: r, cols, total, dataStart: r + (twoRow ? 2 : 1) };
       }
     }
@@ -390,6 +424,7 @@
     const { cols, dataStart } = det;
     const out = [];
     const heads = [];   // ngăn xếp tiêu đề: [{lvl, text}]
+    let codedLvl = 0;   // cấp của tiêu đề có mã gần nhất (A, I, 1.1…): tiêu đề không mã nằm ngay dưới nó
     const cell = (r, k) => cols[k] === undefined ? null : (grid[r] || [])[cols[k]];
     for (let r = dataStart; r < grid.length; r++) {
       const row = grid[r] || [];
@@ -405,8 +440,16 @@
         desc = alt.trim();
       }
       const nd = norm(desc);
-      if (/^(tong cong|tong cong truoc thue|cong|tong|total|sub total|subtotal|grand total|thue vat|vat|cong hang muc|tong gia tri|carried forward|brought forward)\b/.test(nd) && !unit) {
+      // Dòng tổng / thuế / chuyển trang (chú ý: "CÔNG TÁC…" không phải "CỘNG", "TỔNG QUÁT" không phải dòng tổng)
+      const SUM = /^(tong (cong|gia tri|so tien|tien|muc|hang muc|chi phi)|cong( \d+| hang muc| muc| don| chuyen trang)?$|cong (hang muc|muc|don|chuyen trang)\b|total|sub ?total|grand total|thue( vat| gtgt)?\b|vat\b|carried forward|brought forward|chuyen (sang )?trang|mang sang)/;
+      if (SUM.test(nd) && !unit) {
         out.push({ kind: 'sum', r, desc, code, sheet: sheetName });
+        continue;
+      }
+      // Ghi chú / thuyết minh: chữ "Ghi chú" ở cột đơn vị, đoạn văn dài, dòng "......" → không phải hạng mục hay tiêu đề
+      const nu = norm(unit);
+      if (/^(ghi chu|note|notes|remark|xem ghi chu)$/.test(nu) || /^[.…\-_\s]+$/.test(desc) || (!code && !unit && qty === null && desc.length > 90)) {
+        out.push({ kind: 'note', r, desc, code, sheet: sheetName });
         continue;
       }
       if (unit || (qty !== null && qty !== 0)) {
@@ -418,11 +461,12 @@
         });
       } else {
         // Cấp tiêu đề: theo mã (A, I, 1, 1.1, 1.1.1) hoặc theo thứ tự xuất hiện
-        let lvl = 1;
+        let lvl;
         if (/^[A-Z]$|^[IVXLC]+$/.test(code)) lvl = 1;
         else if (/^\d+$/.test(code)) lvl = 2;
         else if (/^\d+(\.\d+)+$/.test(code)) lvl = 1 + code.split('.').length;
-        else lvl = heads.length ? heads[heads.length - 1].lvl + 1 : 1;
+        if (lvl) codedLvl = lvl;
+        else lvl = codedLvl + 1;   // các tiêu đề phụ không mã liền nhau là ngang cấp
         while (heads.length && heads[heads.length - 1].lvl >= lvl) heads.pop();
         heads.push({ lvl, text: desc.length > 140 ? desc.slice(0, 140) : desc });
         if (heads.length > 4) heads.shift();

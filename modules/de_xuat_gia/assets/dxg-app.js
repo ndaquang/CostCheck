@@ -114,7 +114,9 @@
         if (sh.state !== 'visible' || OWN.test(sh.name)) return;
         const grid = wb.grid(si);
         const det = prev.get(sh.name) || DXG.detectColumns(grid);
-        S.sheets.push({ si, name: sh.name, grid, det: det ? JSON.parse(JSON.stringify(det)) : { headerRow: 0, dataStart: 1, cols: {} }, include: !!det, auto: !!det });
+        // sheet chỉ có thuyết minh / điều kiện chung (không có dòng hạng mục) thì mặc định không dùng
+        const nItem = det ? DXG.extractLines(grid, det, sh.name).filter(l => l.kind === 'item').length : 0;
+        S.sheets.push({ si, name: sh.name, grid, det: det ? JSON.parse(JSON.stringify(det)) : { headerRow: 0, dataStart: 1, cols: {} }, include: nItem > 0, auto: !!det });
       });
       $('#n-boq').textContent = file.name;
       const ok = S.sheets.filter(s => s.include).length;
@@ -168,7 +170,9 @@
     const t = $('#map-tbl');
     let h = `<thead><tr><th>Dùng</th><th>Sheet</th><th>Dòng tiêu đề</th>${KEYS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}<th>Số dòng hạng mục</th></tr></thead><tbody>`;
     S.sheets.forEach((sh, k) => {
-      const width = Math.max(1, ...sh.grid.slice(0, 200).map(r => r.length));
+      // chỉ liệt kê tới cột cuối có tiêu đề + vài cột (sheet có thể "rộng" tới 16.384 cột do định dạng)
+      const hdrW = Math.max(0, ...[sh.det.headerRow, sh.det.headerRow + 1].map(r => (sh.grid[r] || []).reduce((m, v, c) => (v !== null && v !== undefined && v !== '' ? c + 1 : m), 0)));
+      const width = Math.min(Math.max(hdrW + 6, 12, ...Object.values(sh.det.cols).map(c => c + 2)), 60);
       const opts = sel => '<option value="">—</option>' + Array.from({ length: width }, (_, c) => {
         const ht = headerText(sh, c);
         return `<option value="${c}"${sel === c ? ' selected' : ''}>${XLSXIO.colName(c)}${ht ? ' · ' + esc(String(ht).slice(0, 28)) : ''}</option>`;
@@ -208,7 +212,7 @@
       for (const l of lines) {
         if (l.kind === 'item') {
           l.id = `${sh.name}|${l.r}`; l.si = sh.si; l.sh = sh;
-          l.cands = DXG.match(IX, { desc: l.desc, unit: l.unit, ctx: l.ctx });
+          l.cands = DXG.match(IX, { desc: l.desc, unit: l.unit, ctx: l.ctx, near: l.heads[l.heads.length - 1] || '' });
           l.sel = l.cands.length ? 0 : -1;
           l.baseCol = isNum(l.base) && l.base > 0 ? l.base : null;
           l.baseFile = null; l.baseManual = null; l.skip = false; l.note = '';

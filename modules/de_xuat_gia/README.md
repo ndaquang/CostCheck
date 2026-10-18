@@ -95,6 +95,23 @@ Dữ liệu chạy thử gồm CSDL giả lập (khoảng 500 báo giá, 40 nhó
 - ảnh giao diện;
 - `KET_QUA.md`: tóm tắt, chi tiết từng dòng, kết quả kiểm tra format và công thức.
 
+Chạy trên một file BOQ bất kỳ (BOQ thật):
+
+```
+node modules/de_xuat_gia/demo/chay_file.js --boq <file.xlsx> [--baseline <file.xlsx>] [--db <db.js>] [--out <thư mục>]
+```
+
+Mặc định so với CSDL giả lập. Muốn có giá tham khảo thật thì truyền `--db` là CSDL thật dạng `window.DB = {...}`, hoặc dùng trang web với gói `.dgbw`.
+
+### Các mẫu BOQ thật đã xử lý
+- Dòng có chữ "Ghi chú" ở cột Đơn vị, đoạn thuyết minh dài, dòng "......" được bỏ qua: không phải hạng mục, cũng không phải tiêu đề.
+- "CÔNG TÁC …" là tiêu đề, không nhầm với dòng "CỘNG"; "TỔNG QUÁT" không phải dòng tổng.
+- Tiêu đề phụ không có mã ("BÊ TÔNG LÓT B10", "BÊ TÔNG B20, W8") ngang cấp nhau, nằm dưới tiêu đề có mã gần nhất (A, B, I…).
+- Tiêu đề bảng 2 dòng có dòng con ngắn ("Khối lượng" → "Mời thầu / Dự thầu").
+- Mô tả ngắn ("Móng", "Dầm", "Sàn tầng 1") dùng tiêu đề gần nhất làm nội dung chính khi khớp, nhưng vẫn ưu tiên từ của chính mô tả.
+- Cấp độ bền bê tông B quy về mác M (B10 → M150, B20 → M250, B25 → M350…). Thông số có tiền tố khác giá trị (M150/M300, D10/D18, CB300/CB500) bị phạt mạnh.
+- Sheet chỉ có điều kiện chung hoặc thuyết minh (không có dòng hạng mục) mặc định không dùng. Sheet "rộng" hàng nghìn cột vẫn đọc nhanh.
+
 ## Kiểm thử
 
 ```

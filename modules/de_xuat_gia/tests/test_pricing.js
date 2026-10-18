@@ -92,4 +92,35 @@ t('bách phân vị', () => {
   assert.strictEqual(DXG.percentRank([1, 2, 3, 4], 9), 1);
   assert.strictEqual(DXG.percentRank([1, 2, 3, 4], 2.5), 0.5);
 });
+t('BOQ thật: ghi chú, "CÔNG TÁC…" là tiêu đề, tiêu đề phụ ngang cấp, tiêu đề phụ "Mời thầu/Dự thầu"', () => {
+  const grid = [
+    ['Stt', 'Mô tả', 'Đơn vị', 'Khối lượng', null, 'Đơn giá (VNĐ)', 'Thành tiền'],
+    [null, null, null, 'Mời thầu', 'Dự thầu'],
+    ['A', 'CÔNG TÁC ĐẤT'],
+    [null, 'Công tác được xem như bao gồm đào móng, vận chuyển, lấp đất, đầm chặt theo đúng chỉ dẫn kỹ thuật của dự án và các tiêu chuẩn'],
+    [null, 'Công tác đào đất'],
+    ['1', 'Móng & đà kiềng', 'm3', 339],
+    ['B', 'CÔNG TÁC BÊ TÔNG'],
+    [null, 'Bê tông thương phẩm đổ bằng bơm', 'Ghi chú'],
+    [null, 'BÊ TÔNG LÓT B10'],
+    ['1', 'Móng, giằng móng', 'm3', 13],
+    [null, 'BÊ TÔNG B20, W8'],
+    ['1', 'Móng', 'm3', 27],
+    [null, '.................................'],
+    [null, 'TỔNG GIÁ TRỊ', null, null, null, null, 0],
+  ];
+  const d = DXG.detectColumns(grid);
+  assert.strictEqual(d.dataStart, 2); assert.strictEqual(d.cols.qty, 3); assert.strictEqual(d.cols.rate, 5);
+  const L = DXG.extractLines(grid, d, 'B2');
+  assert.deepStrictEqual(L.map(l => l.kind), ['head', 'note', 'head', 'item', 'head', 'note', 'head', 'item', 'head', 'item', 'note', 'sum']);
+  assert.deepStrictEqual(L[9].heads, ['CÔNG TÁC BÊ TÔNG', 'BÊ TÔNG B20, W8']);
+});
+t('cấp độ bền B → mác M; mô tả ngắn dùng tiêu đề gần nhất', () => {
+  assert.deepStrictEqual(DXG.tokens('Bê tông lót B10'), ['be', 'tong', 'lot', 'm', '150']);
+  assert.deepStrictEqual(DXG.tokens('Sàn tầng B1'), ['san', 'tang', 'b', '1']);   // không phải bê tông thì giữ nguyên
+  const m = DXG.match(IX, { desc: 'Móng, giằng móng', unit: 'm3', near: 'BÊ TÔNG LÓT B10', ctx: 'CÔNG TÁC BÊ TÔNG · BÊ TÔNG LÓT B10' });
+  assert.strictEqual(IX.groups[m[0].g].name, 'Bê tông lót móng M150 đá 4x6');
+  const v = DXG.match(IX, { desc: 'Móng', unit: 'm2', near: 'CÔNG TÁC VÁN KHUÔN', ctx: 'CÔNG TÁC VÁN KHUÔN' });
+  assert.strictEqual(IX.groups[v[0].g].name, 'Ván khuôn móng');
+});
 console.log(`\n${n} nhóm kiểm thử đạt.`);
