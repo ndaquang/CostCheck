@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="cho-nhan-vien" content="0">
+<title>Đề xuất giá BOQ</title>
+<link rel="stylesheet" href="assets/dxg.css?v=1">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<link rel="stylesheet" href="../shared/gate.css">
+<link rel="stylesheet" href="../shared/secure-ui.css">
+</head>
+<body>
+<div id="splash">
+  <div class="splash-box">
+    <div class="logo">ĐG</div>
+    <div id="splash-msg">Đang nạp dữ liệu đơn giá…</div>
+    <div class="bar"><span></span></div>
+    <div class="muted small" id="splash-err"></div>
+  </div>
+</div>
+
+<header class="top">
+  <div class="brand">
+    <div class="logo">ĐG</div>
+    <div>
+      <div class="title">Đề xuất giá BOQ</div>
+      <div class="sub" id="db-meta"></div>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <nav class="topnav">
+    <a href="../index.html">Tra cứu đơn giá</a>
+    <a href="#" class="on">Đề xuất giá BOQ</a>
+  </nav>
+</header>
+
+<main class="wrap">
+  <!-- Bước 1: nạp file -->
+  <section class="card" id="step-load">
+    <h2><span class="step">1</span> Nạp file</h2>
+    <div class="drops">
+      <label class="drop" id="drop-boq">
+        <input type="file" id="f-boq" accept=".xlsx,.xlsm">
+        <b>File BOQ cần định giá</b>
+        <span class="muted small">Kéo thả hoặc bấm để chọn (.xlsx). Phần mềm tự nhận cột Mô tả / Đơn vị / Khối lượng / Đơn giá.</span>
+        <span class="fname" id="n-boq"></span>
+      </label>
+      <label class="drop" id="drop-base">
+        <input type="file" id="f-base" accept=".xlsx,.xlsm">
+        <b>Giá baseline <span class="muted">(không bắt buộc, nạp lúc nào cũng được)</span></b>
+        <span class="muted small">File Excel có Mã/STT, Mô tả, Đơn vị và cột giá baseline. Hoặc chọn cột baseline ngay trong file BOQ ở bước 2.</span>
+        <span class="fname" id="n-base"></span>
+      </label>
+      <label class="drop small-drop" id="drop-sess">
+        <input type="file" id="f-sess" accept=".json,.dgbq">
+        <b>Mở phiên đã lưu</b>
+        <span class="muted small">Khôi phục các lựa chọn, giá sửa tay, baseline đã nhập (.dgbq).</span>
+        <span class="fname" id="n-sess"></span>
+      </label>
+    </div>
+    <div class="msg" id="load-msg" hidden></div>
+  </section>
+
+  <!-- Bước 2: cấu trúc -->
+  <section class="card" id="step-map" hidden>
+    <h2><span class="step">2</span> Kiểm tra cấu trúc bảng</h2>
+    <p class="muted small">Phần mềm đã tự nhận diện dòng tiêu đề và các cột. Sửa lại nếu sai, bỏ chọn sheet không cần định giá.</p>
+    <div class="tbl-wrap"><table class="map" id="map-tbl"></table></div>
+    <div class="dx-actions"><button class="btn primary" id="go">Đề xuất giá →</button></div>
+  </section>
+
+  <!-- Bước 3: kết quả -->
+  <section id="step-res" hidden>
+    <div class="card opts">
+      <div class="opt"><label>Cách chọn giá</label><select id="o-strategy"></select></div>
+      <div class="opt"><label>Năm báo giá từ</label><input id="o-yfrom" type="number" min="2000" max="2100" placeholder="tất cả"></div>
+      <div class="opt"><label>đến</label><input id="o-yto" type="number" min="2000" max="2100" placeholder="tất cả"></div>
+      <div class="opt"><label>Loại hình dự án</label><details class="msel" id="o-type"><summary>Tất cả</summary><div class="msel-list"></div></details></div>
+      <div class="opt"><label>Tỉnh/TP</label><details class="msel" id="o-prov"><summary>Tất cả</summary><div class="msel-list"></div></details></div>
+      <div class="opt"><label>Hệ số điều chỉnh</label><input id="o-factor" type="number" step="0.5" value="100"><span class="unit">%</span></div>
+      <div class="opt"><label>Tự điền khi tin cậy ≥</label><select id="o-minconf"><option value="cao">Cao</option><option value="tb">Trung bình</option><option value="thap" selected>Thấp</option></select></div>
+      <div class="opt"><label>Ngưỡng lệch baseline</label><input id="o-tol1" type="number" value="5" step="1"><span class="unit">%</span><input id="o-tol2" type="number" value="15" step="1"><span class="unit">%</span></div>
+      <div class="opt chk"><label><input type="checkbox" id="o-review" checked> Bỏ dòng REVIEW</label><label><input type="checkbox" id="o-outlier" checked> Bỏ giá ngoại lai</label><label><input type="checkbox" id="o-warn"> Bỏ dòng có cảnh báo</label></div>
+    </div>
+
+    <div class="kpis" id="kpis"></div>
+
+    <div class="tabs">
+      <button class="tab on" data-tab="lines">Chi tiết dòng</button>
+      <button class="tab" data-tab="sum">Tổng hợp & so sánh baseline</button>
+      <div class="spacer"></div>
+      <button class="btn" id="save-sess" title="Lưu lựa chọn, giá sửa tay, baseline để làm tiếp sau">Lưu phiên</button>
+      <button class="btn primary" id="dx-export">Xuất Excel đã điền giá</button>
+    </div>
+
+    <div id="tab-lines">
+      <div class="toolbar">
+        <div class="seg" id="flt">
+          <button data-f="all" class="on">Tất cả</button>
+          <button data-f="check">Cần kiểm tra</button>
+          <button data-f="none">Không khớp</button>
+          <button data-f="dev">Lệch baseline</button>
+          <button data-f="nobase">Chưa có baseline</button>
+          <button data-f="manual">Đã sửa tay</button>
+        </div>
+        <input id="flt-q" type="search" placeholder="Lọc theo mô tả / mã…">
+        <span class="muted small" id="flt-count"></span>
+      </div>
+      <div class="tbl-wrap"><table class="res" id="res-tbl"></table></div>
+      <div class="more" id="more" hidden><button class="btn">Xem thêm</button></div>
+    </div>
+    <div id="tab-sum" hidden></div>
+  </section>
+</main>
+
+<!-- Ngăn chi tiết dòng -->
+<aside id="drawer" hidden>
+  <div class="drawer-head"><b id="dw-title">Chi tiết dòng</b><button class="ghost" id="dw-close">✕</button></div>
+  <div id="dw-body"></div>
+</aside>
+
+<!-- Hộp thoại xuất file -->
+<div id="dlg" class="dlg" hidden>
+  <form class="dlg-box" id="dlg-form">
+    <h3>Xuất Excel đã điền giá</h3>
+    <p class="muted small">File gốc được giữ nguyên định dạng; phần mềm chỉ điền vào ô và thêm cột/sheet phân tích.</p>
+    <fieldset>
+      <legend>Cột Đơn giá trong BOQ</legend>
+      <label><input type="radio" name="x-rate" value="empty" checked> Chỉ điền ô đang trống</label>
+      <label><input type="radio" name="x-rate" value="all"> Ghi đè mọi ô (trừ ô có công thức)</label>
+      <label><input type="radio" name="x-rate" value="no"> Không ghi vào cột Đơn giá</label>
+    </fieldset>
+    <label><input type="checkbox" id="x-amount" checked> Ô Thành tiền trống: điền công thức = Khối lượng × Đơn giá</label>
+    <label><input type="checkbox" id="x-split" checked> Có cột Vật liệu/Nhân công: điền tách theo tỷ lệ trung vị của nhóm</label>
+    <label><input type="checkbox" id="x-cols" checked> Thêm cột phân tích bên phải mỗi sheet (đề xuất, P25–P75, tin cậy, baseline, chênh lệch)</label>
+    <label><input type="checkbox" id="x-sheets" checked> Thêm sheet DX_TongHop và DX_ChiTiet</label>
+    <label class="admin-only"><input type="checkbox" id="x-ref" checked> Thêm sheet DX_ThamChieu (các báo giá dùng để tính)</label>
+    <div class="dx-actions"><button type="button" class="btn" id="dlg-cancel">Hủy</button><button type="submit" class="btn primary">Xuất file</button></div>
+  </form>
+</div>
+
+<script src="../shared/crypto-web.js"></script>
+<script src="../shared/secure.js" data-build="admin" data-scripts="../shared/secure-ui.js,assets/pricing.js?v=1,assets/xlsx-io.js?v=1,assets/dxg-app.js?v=1"></script>
+</body>
+</html>
