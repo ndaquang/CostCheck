@@ -27,7 +27,7 @@ MODULES = os.path.join(HERE, "modules")
 # Module: (thư mục nguồn trong modules/, đường dẫn trên web, nhãn trên thanh điều hướng, cho phép nhân viên dùng?)
 # Mặc định chỉ admin — giữ đúng chính sách "nhân viên chỉ tra cứu, không xuất". Đổi thành True để mở cho nhân viên
 # (nhân viên vẫn không thấy dự án / nguồn báo giá, không có sheet tham chiếu).
-MODULE_LIST = [("de_xuat_gia", "de-xuat-gia", "Đề xuất giá BOQ", False)]
+MODULE_LIST = [("de_xuat_gia", "de-xuat-gia", "Tham khảo giá BOQ", False)]
 
 # Chính sách nội dung: trang chỉ được tải mã từ chính site; không gọi mạng được (connect-src 'none'),
 # nên dữ liệu đã giải mã trong trang không gửi đi đâu được ngay cả khi có mã độc chèn vào.

@@ -1,6 +1,9 @@
 'use strict';
-/* Đề xuất giá BOQ — giao diện. Dữ liệu đơn giá nạp qua window.SECURE (gói .dgbw) giống app tra cứu;
-   khi chạy thử không có cổng đăng nhập thì nạp data/db.js. Mọi xử lý diễn ra trong trình duyệt, không gửi dữ liệu đi đâu. */
+/* Tham khảo & đánh giá giá BOQ — công cụ TƯ VẤN cho QS.
+   • QS là người lập toàn bộ giá trong Excel; CSDL đơn giá chỉ là nguồn tham khảo.
+   • Phần mềm KHÔNG ghi vào sheet BOQ gốc: mọi kết quả nằm ở sheet mới TK_*; sheet TK_DanhGia dùng công thức
+     trỏ về ô giá của QS nên tự cập nhật khi QS sửa giá trong Excel.
+   Dữ liệu nạp qua window.SECURE (gói .dgbw) như app tra cứu; chạy thử không có cổng đăng nhập thì nạp data/db.js. */
 (() => {
   const $ = (s, el = document) => el.querySelector(s);
   const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -13,16 +16,18 @@
   const isNum = v => typeof v === 'number' && isFinite(v);
   const ROLE = (window.SECURE && window.SECURE.role) || 'admin';
   const ADMIN = ROLE === 'admin';
-  const LEVEL = { cao: 'Cao', tb: 'Trung bình', thap: 'Thấp', none: 'Không khớp' };
-  const LEVEL_RANK = { cao: 3, tb: 2, thap: 1, none: 0 };
-  const KEYS = [['code', 'Mã/STT'], ['desc', 'Mô tả *'], ['unit', 'Đơn vị'], ['qty', 'Khối lượng'], ['rate', 'Đơn giá'], ['amount', 'Thành tiền'], ['mat', 'ĐG vật liệu'], ['lab', 'ĐG nhân công'], ['base', 'Giá baseline']];
+  const FIT = { cao: 'Cao', tb: 'Trung bình', thap: 'Thấp', none: 'Không khớp' };
+  // Đánh giá giá QS so với phân bố giá CSDL (cùng nhãn với công thức trong sheet TK_DanhGia)
+  const EVAL = { ok: 'Hợp lý', xem: 'Cần xem', bt: 'Bất thường', nogia: 'Chưa có giá QS', notk: 'Không có tham khảo', skip: 'Bỏ qua' };
+  const KEYS = [['code', 'Mã/STT'], ['desc', 'Mô tả *'], ['unit', 'Đơn vị'], ['qty', 'Khối lượng'], ['rate', 'Đơn giá QS'], ['amount', 'Thành tiền'], ['base', 'Giá baseline']];
   const PAGE = 300;
+  const OWN = /^(TK|DX)_/;   // sheet do phần mềm tạo, bỏ qua khi đọc
 
   let IX = null;
   const S = {
     wb: null, fileName: '', sheets: [], lines: [], items: [],
     baseList: null, baseName: '', session: null,
-    opt: { strategy: 'med', yearFrom: null, yearTo: null, types: new Set(), provs: new Set(), excludeReview: true, excludeOutlier: true, excludeWarn: false, factor: 1, minConf: 'thap', tol1: 0.05, tol2: 0.15 },
+    opt: { yearFrom: null, yearTo: null, types: new Set(), provs: new Set(), excludeReview: true, excludeOutlier: true, excludeWarn: false, factor: 1, tolBl: 0.10 },
     view: { f: 'all', q: '', shown: PAGE, tab: 'lines', cur: null },
   };
 
@@ -31,7 +36,7 @@
     // Nhân viên chỉ dùng được khi admin bật cờ cho_nhan_vien trong build.py
     const meta = document.querySelector('meta[name="cho-nhan-vien"]');
     if (!ADMIN && !(meta && meta.content === '1')) {
-      $('#splash-msg').textContent = 'Chức năng Đề xuất giá BOQ chỉ dành cho tài khoản admin.';
+      $('#splash-msg').textContent = 'Chức năng Tham khảo giá BOQ chỉ dành cho tài khoản admin.';
       $('.bar').hidden = true;
       return;
     }
@@ -56,13 +61,11 @@
     buildOptions();
     bindUI();
     $('#splash').remove();
-    console.log(`Chỉ mục đề xuất giá: ${Math.round(performance.now() - t0)} ms, ${IX.groups.length} nhóm`);
+    console.log(`Chỉ mục tham khảo giá: ${Math.round(performance.now() - t0)} ms, ${IX.groups.length} nhóm`);
   }
 
   /* ---------- Tùy chọn ---------- */
   function buildOptions() {
-    const sel = $('#o-strategy');
-    sel.innerHTML = Object.entries(DXG.STRATEGY).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
     const P = window.DB.projects || [];
     const fill = (id, vals, set) => {
       const box = $(`#${id} .msel-list`);
@@ -79,18 +82,15 @@
   }
   function readOptions() {
     const o = S.opt, n = id => { const v = $(id).value.trim(); return v === '' ? null : +v; };
-    o.strategy = $('#o-strategy').value;
     o.yearFrom = n('#o-yfrom'); o.yearTo = n('#o-yto');
     o.factor = (n('#o-factor') ?? 100) / 100;
-    o.minConf = $('#o-minconf').value;
-    o.tol1 = (n('#o-tol1') ?? 5) / 100; o.tol2 = (n('#o-tol2') ?? 15) / 100;
+    o.tolBl = (n('#o-tol') ?? 10) / 100;
     o.excludeReview = $('#o-review').checked; o.excludeOutlier = $('#o-outlier').checked; o.excludeWarn = $('#o-warn').checked;
   }
   function writeOptions() {
     const o = S.opt;
-    $('#o-strategy').value = o.strategy; $('#o-yfrom').value = o.yearFrom ?? ''; $('#o-yto').value = o.yearTo ?? '';
-    $('#o-factor').value = Math.round(o.factor * 1000) / 10; $('#o-minconf').value = o.minConf;
-    $('#o-tol1').value = o.tol1 * 100; $('#o-tol2').value = o.tol2 * 100;
+    $('#o-yfrom').value = o.yearFrom ?? ''; $('#o-yto').value = o.yearTo ?? '';
+    $('#o-factor').value = Math.round(o.factor * 1000) / 10; $('#o-tol').value = Math.round(o.tolBl * 1000) / 10;
     $('#o-review').checked = o.excludeReview; $('#o-outlier').checked = o.excludeOutlier; $('#o-warn').checked = o.excludeWarn;
     for (const [id, set] of [['o-type', o.types], ['o-prov', o.provs]]) {
       $$(`#${id} input`).forEach(i => { i.checked = set.has(i.value); });
@@ -104,12 +104,15 @@
     try {
       msg('Đang đọc file BOQ…');
       const wb = await XLSXIO.read(await file.arrayBuffer());
+      // Nạp lại BOQ (vd sau khi QS đã nhập giá): giữ các lựa chọn nhóm, baseline nhập tay, ý kiến đã có
+      if (S.items.length) S.session = sessionData();
+      const prev = new Map(S.sheets.map(s => [s.name, s.det]));
       S.wb = wb; S.fileName = file.name; S.sheets = []; S.items = []; S.lines = [];
       wb.sheets.forEach((sh, si) => {
-        if (sh.state !== 'visible' || /^DX_/.test(sh.name)) return;   // bỏ sheet ẩn và sheet phân tích của lần xuất trước
+        if (sh.state !== 'visible' || OWN.test(sh.name)) return;
         const grid = wb.grid(si);
-        const det = DXG.detectColumns(grid);
-        S.sheets.push({ si, name: sh.name, grid, det: det || { headerRow: 0, dataStart: 1, cols: {} }, include: !!det, auto: !!det });
+        const det = prev.get(sh.name) || DXG.detectColumns(grid);
+        S.sheets.push({ si, name: sh.name, grid, det: det ? JSON.parse(JSON.stringify(det)) : { headerRow: 0, dataStart: 1, cols: {} }, include: !!det, auto: !!det });
       });
       $('#n-boq').textContent = file.name;
       const ok = S.sheets.filter(s => s.include).length;
@@ -125,7 +128,7 @@
       const wb = await XLSXIO.read(await file.arrayBuffer());
       const list = [];
       wb.sheets.forEach((sh, si) => {
-        if (/^DX_/.test(sh.name)) return;
+        if (OWN.test(sh.name)) return;
         const grid = wb.grid(si), det = DXG.detectColumns(grid);
         if (!det) return;
         const priceCol = det.cols.base ?? det.cols.rate;
@@ -138,13 +141,13 @@
       $('#n-base').textContent = `${file.name} · ${NF.format(list.length)} giá`;
       if (S.items.length) { applyBaseline(); recompute(); }
       const hit = S.items.filter(it => isNum(it.baseFile)).length;
-      msg(S.items.length ? `Baseline: đọc ${NF.format(list.length)} giá, ghép được ${NF.format(hit)}/${NF.format(S.items.length)} dòng BOQ.` : `Đã đọc ${NF.format(list.length)} giá baseline. Sẽ ghép vào BOQ khi đề xuất giá.`, 'ok');
+      msg(S.items.length ? `Baseline: đọc ${NF.format(list.length)} giá, ghép được ${NF.format(hit)}/${NF.format(S.items.length)} dòng BOQ.` : `Đã đọc ${NF.format(list.length)} giá baseline. Sẽ ghép vào BOQ ở bước 3.`, 'ok');
     } catch (e) { console.error(e); msg('Không đọc được file baseline: ' + (e.message || e), 'err'); }
   }
   async function loadSession(file) {
     try {
       const j = JSON.parse(await file.text());
-      if (j.dinh_dang !== 'DGBQ1') throw new Error('Không phải file phiên đề xuất giá.');
+      if (!['DGBQ1', 'DGBQ2'].includes(j.dinh_dang)) throw new Error('Không phải file phiên làm việc.');
       S.session = j;
       $('#n-sess').textContent = file.name;
       if (j.opt) { Object.assign(S.opt, j.opt, { types: new Set(j.opt.types || []), provs: new Set(j.opt.provs || []) }); writeOptions(); }
@@ -161,7 +164,7 @@
   };
   function renderMap() {
     const t = $('#map-tbl');
-    let h = `<thead><tr><th>Định giá</th><th>Sheet</th><th>Dòng tiêu đề</th>${KEYS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}<th>Số dòng hạng mục</th></tr></thead><tbody>`;
+    let h = `<thead><tr><th>Dùng</th><th>Sheet</th><th>Dòng tiêu đề</th>${KEYS.map(([, l]) => `<th>${esc(l)}</th>`).join('')}<th>Số dòng hạng mục</th></tr></thead><tbody>`;
     S.sheets.forEach((sh, k) => {
       const width = Math.max(1, ...sh.grid.slice(0, 200).map(r => r.length));
       const opts = sel => '<option value="">—</option>' + Array.from({ length: width }, (_, c) => {
@@ -189,10 +192,10 @@
     renderMap();
   }
 
-  /* ---------- Đề xuất ---------- */
+  /* ---------- Bước 3: tham khảo ---------- */
   async function runAll() {
     const use = S.sheets.filter(s => s.include && s.det.cols.desc !== undefined);
-    if (!use.length) { alert('Chưa có sheet nào được chọn hoặc chưa chọn cột Mô tả.'); return; }
+    if (!use.length) { msg('Chưa có sheet nào được chọn hoặc chưa chọn cột Mô tả ở bước 2.', 'err'); return; }
     const t0 = performance.now(), btn = $('#go');
     btn.disabled = true;
     S.lines = []; S.items = [];
@@ -205,10 +208,12 @@
           l.id = `${sh.name}|${l.r}`; l.si = sh.si; l.sh = sh;
           l.cands = DXG.match(IX, { desc: l.desc, unit: l.unit, ctx: l.ctx });
           l.sel = l.cands.length ? 0 : -1;
-          if (++done % 100 === 0) { btn.textContent = `Đang khớp… ${NF.format(done)} dòng`; await new Promise(r => setTimeout(r)); }
           l.baseCol = isNum(l.base) && l.base > 0 ? l.base : null;
-          l.baseFile = null; l.baseManual = null; l.manual = null; l.skip = false; l.note = '';
+          l.baseFile = null; l.baseManual = null; l.skip = false; l.note = '';
+          // Giá QS: cột đơn giá; nếu chỉ có thành tiền thì suy ra = thành tiền / khối lượng
+          l.qs = isNum(l.rate) && l.rate > 0 ? l.rate : (isNum(l.amount) && l.amount > 0 && isNum(l.qty) && l.qty > 0 ? l.amount / l.qty : null);
           S.items.push(l);
+          if (++done % 100 === 0) { btn.textContent = `Đang khớp… ${NF.format(done)} dòng`; await new Promise(r => setTimeout(r)); }
         }
         S.lines.push(l);
       }
@@ -216,7 +221,7 @@
     if (S.session) applySession();
     applyBaseline();
     console.log(`Khớp ${S.items.length} dòng trong ${Math.round(performance.now() - t0)} ms`);
-    btn.disabled = false; btn.textContent = 'Đề xuất giá →';
+    btn.disabled = false; btn.textContent = 'Tra giá tham khảo →';
     $('#step-res').hidden = false;
     S.view.shown = PAGE;
     recompute();
@@ -239,7 +244,7 @@
           it.sel = k;
         }
       } else if (x.gkey === null) it.sel = -1;
-      it.manual = x.manual ?? null; it.baseManual = x.baseManual ?? null; it.skip = !!x.skip; it.note = x.note || '';
+      it.baseManual = x.baseManual ?? null; it.skip = !!x.skip; it.note = x.note || '';
     }
   }
   function manualCand(gid, unit) {
@@ -257,30 +262,38 @@
     if (!statCache.has(k)) statCache.set(k, DXG.groupStats(IX, gid, o, ratio));
     return statCache.get(k);
   }
-  const roundPrice = v => !isNum(v) ? null : v >= 100000 ? Math.round(v / 100) * 100 : v >= 1000 ? Math.round(v / 10) * 10 : Math.round(v);
   function calc(it) {
-    const o = S.opt, c = it.sel >= 0 ? it.cands[it.sel] : null;
+    const o = S.opt, f = o.factor, c = it.sel >= 0 ? it.cands[it.sel] : null;
     const st = c ? stats(c.g, c.ratio) : null;
-    const conf = c ? (c.picked ? { level: 'tb', value: 0.6, picked: true } : DXG.confidence(c, st)) : { level: 'none', value: 0 };
-    if (c && c.picked && st) conf.level = st.n >= 3 ? 'cao' : 'tb';
-    let price = null, src = 'none';
-    if (it.skip) src = 'skip';
-    else if (isNum(it.manual)) { price = it.manual; src = 'manual'; }
-    else if (c && st && LEVEL_RANK[conf.level] >= LEVEL_RANK[o.minConf] && conf.level !== 'none') {
-      price = roundPrice(DXG.STRATEGY[o.strategy].pick(st) * o.factor); src = 'auto';
-    }
+    const fit = c ? (c.picked ? { level: 'cao', value: 1, picked: true } : DXG.confidence(c, st)) : { level: 'none', value: 0 };
+    // nhóm chỉ dùng làm tham khảo khi đủ độ phù hợp hoặc do QS chọn
+    const shown = !!(c && st && (fit.level !== 'none' || c.picked));
+    const ref = shown ? { p10: st.p10 * f, p25: st.p25 * f, p50: st.med * f, p75: st.p75 * f, p90: st.p90 * f } : null;
+    const qs = it.qs;
+    let ev;
+    if (it.skip) ev = 'skip';
+    else if (!ref) ev = 'notk';
+    else if (!isNum(qs)) ev = 'nogia';
+    else if (qs < ref.p10 || qs > ref.p90) ev = 'bt';
+    else if (qs < ref.p25 || qs > ref.p75) ev = 'xem';
+    else ev = 'ok';
+    const zone = !ref || !isNum(qs) ? '' : qs < ref.p10 ? '< P10' : qs < ref.p25 ? 'P10–P25' : qs <= ref.p75 ? 'P25–P75' : qs <= ref.p90 ? 'P75–P90' : '> P90';
+    const prank = ref && isNum(qs) ? DXG.percentRank(st.sorted, qs / f) : null;
     const base = isNum(it.baseManual) ? it.baseManual : isNum(it.baseFile) ? it.baseFile : it.baseCol;
-    const baseSrc = isNum(it.baseManual) ? 'tay' : isNum(it.baseFile) ? 'file' : isNum(it.baseCol) ? 'cột BOQ' : '';
-    const dev = DXG.diff(price, base, it.qty);
-    const devLvl = !dev || dev.pct === null ? '' : Math.abs(dev.pct) <= o.tol1 ? 'ok' : Math.abs(dev.pct) <= o.tol2 ? 'lo' : 'hi';
-    // nhóm chỉ được coi là "đã khớp" khi đủ tin cậy hoặc do người dùng chọn
-    const shown = !!(c && (conf.level !== 'none' || c.picked));
-    const prank = shown && st && isNum(base) ? DXG.percentRank(st.sorted, base / o.factor) : null;
-    const amount = isNum(price) && isNum(it.qty) ? price * it.qty : null;
-    const baseAmt = isNum(base) && isNum(it.qty) ? base * it.qty : null;
-    it.c = { cand: c, shown, st, conf, price, src, base, baseSrc, dev, devLvl, prank, amount, baseAmt,
-      low: st ? st.p25 * o.factor : null, high: st ? st.p75 * o.factor : null,
-      check: !it.skip && src !== 'manual' && (conf.level === 'thap' || conf.level === 'none' || (c && c.unitOk === false) || (st && st.relaxed) || src === 'none') };
+    const baseSrc = isNum(it.baseManual) ? 'nhập tay' : isNum(it.baseFile) ? 'file baseline' : isNum(it.baseCol) ? 'cột BOQ' : '';
+    const dev = DXG.diff(qs, base, it.qty);
+    const devHi = !!(dev && dev.pct !== null && Math.abs(dev.pct) > o.tolBl);
+    const notes = [];
+    if (shown) {
+      if (st.n < 3) notes.push(`Ít mẫu (${st.n} báo giá)`);
+      if (st.relaxed) notes.push('Đã nới bộ lọc');
+      if (c.unitOk === false) notes.push(`Khác đơn vị (${IX.groups[c.g].unit})`);
+      if (fit.level === 'thap') notes.push('Khớp nhóm yếu');
+      if (c.ratio !== 1) notes.push(`Quy đổi ${IX.groups[c.g].unit} ×${fmtQ(c.ratio)}`);
+    }
+    it.c = { cand: c, shown, st, fit, ref, qs, ev, zone, prank, base, baseSrc, dev, devHi, notes,
+      amtQs: isNum(qs) && isNum(it.qty) ? qs * it.qty : null, amtRef: ref && isNum(it.qty) ? ref.p50 * it.qty : null,
+      amtBase: isNum(base) && isNum(it.qty) ? base * it.qty : null };
     return it.c;
   }
   function recompute() {
@@ -294,123 +307,135 @@
 
   /* ---------- KPI ---------- */
   function totals(items) {
-    let n = 0, priced = 0, amt = 0, baseAmt = 0, both = 0, amtBoth = 0, baseBoth = 0;
-    const lv = { cao: 0, tb: 0, thap: 0, none: 0 };
+    const t = { n: 0, tk: 0, qs: 0, ev: { ok: 0, xem: 0, bt: 0, nogia: 0, notk: 0 }, amtQs: 0, qsRef: 0, ref: 0, qsBase: 0, base: 0, nRef: 0, nBase: 0, devHi: 0 };
     for (const it of items) {
-      const c = it.c; if (it.skip) continue; n++;
-      if (c.src === 'manual') lv.man = (lv.man || 0) + 1; else lv[c.conf.level]++;
-      if (isNum(c.price)) priced++;
-      if (isNum(c.amount)) amt += c.amount;
-      if (isNum(c.baseAmt)) baseAmt += c.baseAmt;
-      if (isNum(c.amount) && isNum(c.baseAmt)) { both++; amtBoth += c.amount; baseBoth += c.baseAmt; }
+      const c = it.c; if (it.skip) continue;
+      t.n++; if (c.ref) t.tk++; if (isNum(c.qs)) t.qs++;
+      t.ev[c.ev]++;
+      if (c.devHi) t.devHi++;
+      if (isNum(c.amtQs)) t.amtQs += c.amtQs;
+      if (isNum(c.amtQs) && isNum(c.amtRef)) { t.qsRef += c.amtQs; t.ref += c.amtRef; t.nRef++; }
+      if (isNum(c.amtQs) && isNum(c.amtBase)) { t.qsBase += c.amtQs; t.base += c.amtBase; t.nBase++; }
     }
-    return { n, priced, amt, baseAmt, both, amtBoth, baseBoth, lv };
+    return t;
   }
   function renderKpis() {
-    const t = totals(S.items), checkN = S.items.filter(it => it.c.check).length;
-    const d = t.baseBoth ? (t.amtBoth - t.baseBoth) / t.baseBoth : null;
-    const devHi = S.items.filter(it => it.c.devLvl === 'hi').length;
+    const t = totals(S.items);
+    const dRef = t.ref ? (t.qsRef - t.ref) / t.ref : null, dBase = t.base ? (t.qsBase - t.base) / t.base : null;
     $('#kpis').innerHTML = [
-      ['Dòng hạng mục', NF.format(t.n), `${NF.format(t.priced)} dòng đã có giá (${t.n ? Math.round(t.priced / t.n * 100) : 0}%)`, 'all'],
-      ['Độ tin cậy', `${NF.format(t.lv.cao)} · ${NF.format(t.lv.tb)} · ${NF.format(t.lv.thap)}`, `cao · trung bình · thấp${t.lv.man ? ` · ${NF.format(t.lv.man)} sửa tay` : ''}`, ''],
-      ['Cần kiểm tra', NF.format(checkN), `${NF.format(t.lv.none)} dòng không khớp`, 'check'],
-      ['Tổng giá trị đề xuất', fmt(t.amt), 'VNĐ, theo khối lượng BOQ', ''],
-      ['Tổng baseline', t.baseAmt ? fmt(t.baseAmt) : '—', S.baseName ? `nguồn: ${S.baseName}` : (t.baseAmt ? 'từ cột baseline trong BOQ' : 'chưa nạp baseline'), 'nobase'],
-      ['Chênh lệch so với baseline', d === null ? '—' : pct(d), d === null ? 'trên các dòng có cả hai giá' : `${fmt(t.amtBoth - t.baseBoth)} VNĐ · ${NF.format(t.both)} dòng · ${NF.format(devHi)} dòng lệch > ${Math.round(S.opt.tol2 * 100)}%`, 'dev'],
+      ['Dòng hạng mục', NF.format(t.n), `${NF.format(t.tk)} dòng có giá tham khảo · ${NF.format(t.qs)} dòng QS đã có giá`, 'all'],
+      ['Hợp lý', NF.format(t.ev.ok), 'giá QS trong khoảng P25–P75 của CSDL', 'ok'],
+      ['Cần xem', NF.format(t.ev.xem), 'giá QS trong P10–P25 hoặc P75–P90', 'xem'],
+      ['Bất thường', NF.format(t.ev.bt), 'giá QS dưới P10 hoặc trên P90', 'bt'],
+      ['Tổng giá trị QS', fmt(t.amtQs), `so với P50 CSDL: ${dRef === null ? '—' : pct(dRef)} (${NF.format(t.nRef)} dòng)`, ''],
+      ['So với baseline', dBase === null ? '—' : pct(dBase), dBase === null ? (S.baseName ? 'chưa ghép được dòng nào' : 'chưa có baseline') : `${NF.format(t.nBase)} dòng · ${NF.format(t.devHi)} dòng lệch > ${Math.round(S.opt.tolBl * 100)}%`, 'dev'],
     ].map(([k, v, s, f]) => `<div class="kpi${f ? ' clickable' : ''}" ${f ? `data-f="${f}"` : ''}><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="s">${esc(s)}</div></div>`).join('');
   }
 
-  /* ---------- Bảng kết quả ---------- */
+  /* ---------- Bảng ---------- */
   function visible() {
     const { f, q } = S.view, nq = DXG.norm(q);
     const pass = it => {
       const c = it.c;
-      if (f === 'check' && !c.check) return false;
-      if (f === 'none' && !(c.conf.level === 'none' || it.sel < 0)) return false;
-      if (f === 'dev' && !(c.devLvl === 'lo' || c.devLvl === 'hi')) return false;
-      if (f === 'nobase' && isNum(c.base)) return false;
-      if (f === 'manual' && !(isNum(it.manual) || isNum(it.baseManual) || it.skip || (c.cand && c.cand.picked))) return false;
+      if (['ok', 'xem', 'bt', 'nogia', 'notk'].includes(f) && c.ev !== f) return false;
+      if (f === 'dev' && !c.devHi) return false;
+      if (f === 'note' && !it.note) return false;
       if (nq && !DXG.norm(it.desc + ' ' + it.code + ' ' + it.ctx).includes(nq)) return false;
       return true;
     };
     if (f === 'all' && !nq) return S.lines;
     return S.lines.filter(l => l.kind === 'item' && pass(l));
   }
-  function badge(it) {
-    const c = it.c;
-    if (it.skip) return '<span class="badge b-man">Bỏ qua</span>';
-    if (c.src === 'manual') return '<span class="badge b-man">Sửa tay</span>';
-    return `<span class="badge b-${c.conf.level}" title="Điểm ${Math.round(c.conf.value * 100)}%">${LEVEL[c.conf.level]}</span>`;
-  }
+  const EV_CLS = { ok: 'cao', xem: 'thap', bt: 'none', nogia: 'man', notk: 'man', skip: 'man' };
+  const evBadge = it => `<span class="badge b-${EV_CLS[it.c.ev]}">${EVAL[it.c.ev]}</span>`;
+  const fitBadge = it => it.c.cand ? `<span class="badge b-${it.c.fit.level}" title="Độ phù hợp của nhóm CSDL với mô tả BOQ">${it.c.cand.picked ? 'QS chọn' : FIT[it.c.fit.level]}</span>` : '';
   function rowHtml(l) {
-    if (l.kind === 'sheet') return `<tr class="head"><td colspan="13">Sheet: ${esc(l.sheet)}</td></tr>`;
-    if (l.kind === 'head') return `<tr class="head"><td>${esc(l.code)}</td><td colspan="12">${esc(l.desc)}</td></tr>`;
+    if (l.kind === 'sheet') return `<tr class="head"><td colspan="12">Sheet: ${esc(l.sheet)}</td></tr>`;
+    if (l.kind === 'head') return `<tr class="head"><td>${esc(l.code)}</td><td colspan="11">${esc(l.desc)}</td></tr>`;
     if (l.kind !== 'item') return '';
     const c = l.c, g = c.shown ? IX.groups[c.cand.g] : null;
-    const unitWarn = g && c.cand.unitOk === false ? ` <span class="badge b-none" title="Đơn vị nhóm khác đơn vị BOQ">ĐV ${esc(g.unit)}</span>` : '';
-    const conv = g && c.cand.ratio !== 1 ? ` <span class="price-sub">(${esc(g.unit)} ×${fmtQ(c.cand.ratio)})</span>` : '';
     return `<tr data-id="${esc(l.id)}"${S.view.cur === l ? ' class="sel"' : ''}>
       <td class="small">${esc(l.code)}</td>
-      <td class="desc">${esc(l.desc)}${l.ctx ? `<div class="ctx">${esc(l.ctx)}</div>` : ''}</td>
+      <td class="desc">${esc(l.desc)}${l.ctx ? `<div class="ctx">${esc(l.ctx)}</div>` : ''}${l.note ? `<div class="note">Ý kiến: ${esc(l.note)}</div>` : ''}</td>
       <td>${esc(l.unit)}</td>
       <td class="num">${fmtQ(l.qty)}</td>
-      <td class="grp">${g ? esc(g.name) + conv + unitWarn : c.cand ? `<span class="muted">gợi ý yếu: ${esc(IX.groups[c.cand.g].name)}</span>` : '<span class="muted">—</span>'}${g && c.st ? `<div class="price-sub">${c.st.n} báo giá · ${c.st.proj} dự án${c.st.relaxed ? ' · đã nới bộ lọc' : ''}</div>` : ''}</td>
-      <td>${badge(l)}</td>
-      <td class="num"><b>${fmt(c.price)}</b>${isNum(l.rate) ? `<div class="price-sub">trong file: ${fmt(l.rate)}</div>` : ''}</td>
-      <td class="num small">${g && c.st ? `${fmt(c.low)} – ${fmt(c.high)}` : ''}</td>
-      <td class="num">${fmt(c.amount)}</td>
+      <td class="grp">${g ? esc(g.name) : c.cand ? `<span class="muted">gợi ý yếu: ${esc(IX.groups[c.cand.g].name)}</span>` : '<span class="muted">—</span>'} ${fitBadge(l)}
+        ${g ? `<div class="price-sub">${c.st.n} báo giá · ${c.st.proj} dự án · gần nhất ${c.st.latest || '?'}</div>` : ''}${c.notes.length ? `<div class="price-sub warn">${esc(c.notes.join(' · '))}</div>` : ''}</td>
+      <td class="num"><b>${c.ref ? fmt(c.ref.p50) : ''}</b></td>
+      <td class="num small">${c.ref ? `${fmt(c.ref.p25)} – ${fmt(c.ref.p75)}<div class="price-sub">P10–P90: ${fmt(c.ref.p10)} – ${fmt(c.ref.p90)}</div>` : ''}</td>
+      <td class="num"><b>${fmt(c.qs)}</b></td>
+      <td class="num small">${esc(c.zone)}${c.prank !== null ? `<div class="price-sub">≈ P${Math.round(c.prank * 100)}</div>` : ''}</td>
+      <td>${evBadge(l)}</td>
       <td class="num">${fmt(c.base)}${c.baseSrc ? `<div class="price-sub">${esc(c.baseSrc)}</div>` : ''}</td>
-      <td class="num d-${c.devLvl}">${c.dev ? pct(c.dev.pct) : ''}</td>
-      <td class="num d-${c.devLvl}">${c.dev && isNum(c.dev.amt) ? fmt(c.dev.amt) : ''}</td>
-      <td class="num small" title="Vị trí của giá baseline trong phân bố giá thị trường của nhóm">${c.prank !== null ? 'P' + Math.round(c.prank * 100) : ''}</td></tr>`;
+      <td class="num ${c.devHi ? 'd-hi' : c.dev ? 'd-ok' : ''}">${c.dev ? pct(c.dev.pct) : ''}</td></tr>`;
   }
   function renderTable() {
     const rows = visible(), items = rows.filter(l => l.kind === 'item').length;
-    const shown = rows.slice(0, S.view.shown);
-    $('#res-tbl').innerHTML = `<thead><tr><th>Mã</th><th>Mô tả</th><th>ĐV</th><th class="num">KL</th><th>Nhóm khớp trong CSDL</th><th>Tin cậy</th>
-      <th class="num">ĐG đề xuất</th><th class="num">P25 – P75</th><th class="num">Thành tiền</th><th class="num">Baseline</th><th class="num">Lệch %</th><th class="num">Lệch tiền</th><th class="num" title="Baseline nằm ở bách phân vị nào của giá thị trường">Vị trí BL</th></tr></thead>
-      <tbody>${shown.map(rowHtml).join('')}</tbody>`;
+    $('#res-tbl').innerHTML = `<thead><tr><th>Mã</th><th>Mô tả</th><th>ĐV</th><th class="num">KL</th><th>Nhóm tham khảo trong CSDL</th>
+      <th class="num">Giá TK (P50)</th><th class="num">P25 – P75</th><th class="num">Giá QS</th><th class="num">Vị trí</th><th>Đánh giá</th><th class="num">Baseline</th><th class="num">QS / BL</th></tr></thead>
+      <tbody>${rows.slice(0, S.view.shown).map(rowHtml).join('')}</tbody>`;
     $('#flt-count').textContent = `${NF.format(items)} dòng`;
     $('#more').hidden = rows.length <= S.view.shown;
   }
 
   /* ---------- Ngăn chi tiết ---------- */
   const projOf = i => (window.DB.projects || [])[IX.C.p ? IX.C.p[i] : -1] || [];
-  function openDrawer(it) { S.view.cur = it; renderDrawer(it); $('#drawer').hidden = false; $$('#res-tbl tr.sel').forEach(r => r.classList.remove('sel')); const tr = $(`#res-tbl tr[data-id="${CSS.escape(it.id)}"]`); if (tr) tr.classList.add('sel'); }
+  function openDrawer(it) {
+    if (!it) return;
+    S.view.cur = it; renderDrawer(it); $('#drawer').hidden = false;
+    $$('#res-tbl tr.sel').forEach(r => r.classList.remove('sel'));
+    const tr = $(`#res-tbl tr[data-id="${CSS.escape(it.id)}"]`); if (tr) tr.classList.add('sel');
+  }
   function closeDrawer() { S.view.cur = null; $('#drawer').hidden = true; $$('#res-tbl tr.sel').forEach(r => r.classList.remove('sel')); }
+  // Thanh phân bố P10–P90 và vị trí giá QS / baseline
+  function distBar(c) {
+    if (!c.ref) return '';
+    const { p10, p25, p50, p75, p90 } = c.ref;
+    const pts = [p10, p90, c.qs, c.base].filter(isNum);
+    const lo = Math.min(...pts) * 0.95, hi = Math.max(...pts) * 1.05, x = v => ((v - lo) / (hi - lo) * 100).toFixed(2) + '%';
+    const mark = (v, cls, label) => isNum(v) ? `<span class="pm ${cls}" style="left:${x(v)}" title="${esc(label)}: ${fmt(v)}"><i>${esc(label)}</i></span>` : '';
+    return `<div class="dist"><div class="dist-track">
+      <span class="dist-w" style="left:${x(p10)};width:calc(${x(p90)} - ${x(p10)})"></span>
+      <span class="dist-iqr" style="left:${x(p25)};width:calc(${x(p75)} - ${x(p25)})"></span>
+      <span class="dist-med" style="left:${x(p50)}"></span>
+      ${mark(c.qs, 'pm-qs', 'QS')}${mark(c.base, 'pm-bl', 'BL')}</div>
+      <div class="dist-lab small muted"><span>P10 ${fmt(p10)}</span><span>P25 ${fmt(p25)}</span><span><b>P50 ${fmt(p50)}</b></span><span>P75 ${fmt(p75)}</span><span>P90 ${fmt(p90)}</span></div></div>`;
+  }
   function candHtml(it, c, k) {
-    const g = IX.groups[c.g], st = stats(c.g, c.ratio), o = S.opt;
+    const g = IX.groups[c.g], st = stats(c.g, c.ratio), f = S.opt.factor;
     const conv = c.ratio !== 1 ? ` · quy đổi từ ${esc(g.unit)} ×${fmtQ(c.ratio)}` : '';
     return `<div class="cand${it.sel === k ? ' on' : ''}" data-k="${k}">
       <input type="radio" name="cand"${it.sel === k ? ' checked' : ''}>
       <div><div class="nm">${esc(g.name)}</div>
         <div class="small muted">ĐV ${esc(g.unit || '?')}${conv}${c.unitOk === false ? ' · <b class="d-hi">khác đơn vị</b>' : ''} · ${st.n} báo giá · ${st.proj} dự án · gần nhất ${st.latest || '?'}${st.relaxed ? ' · đã nới bộ lọc' : ''}</div></div>
-      <div class="num"><b>${fmt(st.med * o.factor)}</b><div class="price-sub">${fmt(st.p25 * o.factor)} – ${fmt(st.p75 * o.factor)}</div><div class="price-sub">${c.picked ? 'chọn tay' : 'khớp ' + Math.round(c.score * 100) + '%'}</div></div></div>`;
+      <div class="num"><b>${fmt(st.med * f)}</b><div class="price-sub">${fmt(st.p25 * f)} – ${fmt(st.p75 * f)}</div><div class="price-sub">${c.picked ? 'QS chọn' : 'phù hợp ' + Math.round(c.score * 100) + '%'}</div></div></div>`;
   }
   function renderDrawer(it) {
     const c = it.c || calc(it), o = S.opt;
-    $('#dw-title').textContent = `${it.sheet} · dòng ${it.r + 1}${it.code ? ' · ' + it.code : ''}`;
+    $('#dw-title').textContent = `${it.sheet} · dòng Excel ${it.r + 1}${it.code ? ' · mã ' + it.code : ''}`;
     const kv = [['Mô tả', esc(it.desc)], ['Hạng mục cha', esc(it.ctx)], ['Đơn vị / KL', `${esc(it.unit)} · ${fmtQ(it.qty)}`],
-      ['Đơn giá trong file', fmt(it.rate)], ['Giá đề xuất', `<b>${fmt(c.price)}</b> ${badge(it)} <span class="muted small">${c.src === 'auto' ? DXG.STRATEGY[o.strategy].label + (o.factor !== 1 ? ` × ${Math.round(o.factor * 1000) / 10}%` : '') : ''}</span>`],
-      ['Baseline', isNum(c.base) ? `${fmt(c.base)} <span class="muted small">(${esc(c.baseSrc)}${it.baseHow && c.baseSrc === 'file' ? ', ghép theo ' + esc(it.baseHow) : ''})</span>` : '—'],
-      ['Chênh lệch', c.dev ? `<span class="d-${c.devLvl}">${fmt(c.dev.d)} (${pct(c.dev.pct)})${isNum(c.dev.amt) ? ` · ${fmt(c.dev.amt)} theo KL` : ''}</span>${c.prank !== null ? ` · baseline ở <b>P${Math.round(c.prank * 100)}</b> của thị trường` : ''}` : '—']];
+      ['Giá QS', isNum(c.qs) ? `<b>${fmt(c.qs)}</b>${isNum(it.rate) ? '' : ' <span class="muted small">(= thành tiền / khối lượng)</span>'}` : '<span class="muted">chưa có trong file</span>'],
+      ['Đánh giá', `${evBadge(it)} ${c.zone ? `<span class="small">vị trí ${esc(c.zone)}${c.prank !== null ? ` (≈ P${Math.round(c.prank * 100)})` : ''}</span>` : ''}`],
+      ['Baseline', isNum(c.base) ? `${fmt(c.base)} <span class="muted small">(${esc(c.baseSrc)}${it.baseHow && c.baseSrc === 'file baseline' ? ', ghép theo ' + esc(it.baseHow) : ''})</span>${c.dev ? ` · QS lệch <span class="${c.devHi ? 'd-hi' : 'd-ok'}">${pct(c.dev.pct)}</span>` : ''}` : '—'],
+      ['Lưu ý dữ liệu', c.notes.length ? `<span class="warn">${esc(c.notes.join(' · '))}</span>` : '—']];
     let h = `<div class="row-in" style="justify-content:space-between;margin-bottom:10px"><button class="btn sm" data-do="prev">← Dòng trước</button><button class="btn sm" data-do="next">Dòng sau →</button></div>
       <div class="kv">${kv.map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('')}</div>
-      <h4>Điều chỉnh</h4>
-      <div class="row-in"><label>Giá sửa tay</label><input type="number" id="dw-manual" step="any" value="${isNum(it.manual) ? it.manual : ''}" placeholder="${fmt(c.src === 'auto' ? c.price : null)}">
-        <label>Baseline</label><input type="number" id="dw-base" step="any" value="${isNum(it.baseManual) ? it.baseManual : ''}" placeholder="${isNum(it.baseFile ?? it.baseCol) ? fmt(it.baseFile ?? it.baseCol) : 'nhập giá'}">
-        <button class="btn sm primary" data-do="apply">Áp dụng</button></div>
-      <div class="row-in" style="margin-top:6px"><input type="text" id="dw-note" placeholder="Ghi chú cho dòng này" value="${esc(it.note)}" style="flex:1">
-        <label><input type="checkbox" id="dw-skip"${it.skip ? ' checked' : ''}> Không định giá dòng này</label></div>
-      <h4>Nhóm công việc khớp trong CSDL ${it.cands.length ? '' : '<span class="muted">(không tìm thấy — tìm thủ công bên dưới)</span>'}</h4>
+      <h4>Phân bố giá tham khảo${o.factor !== 1 ? ` (đã nhân hệ số ${Math.round(o.factor * 1000) / 10}%)` : ''}</h4>
+      ${c.ref ? distBar(c) : '<div class="muted small">Chưa có nhóm tham khảo phù hợp — chọn hoặc tìm nhóm bên dưới.</div>'}
+      <h4>Ý kiến QS / tư vấn</h4>
+      <textarea id="dw-note" rows="3" placeholder="vd: Giá thấp do NCC chào giá khuyến mãi; đề nghị kiểm tra lại quy cách…">${esc(it.note)}</textarea>
+      <div class="row-in" style="margin-top:6px"><label>Baseline nhập tay</label><input type="number" id="dw-base" step="any" value="${isNum(it.baseManual) ? it.baseManual : ''}" placeholder="${isNum(it.baseFile ?? it.baseCol) ? fmt(it.baseFile ?? it.baseCol) : 'nhập giá'}">
+        <label><input type="checkbox" id="dw-skip"${it.skip ? ' checked' : ''}> Không đánh giá dòng này</label>
+        <button class="btn sm primary" data-do="apply">Lưu</button></div>
+      <h4>Nhóm công việc tham khảo trong CSDL ${it.cands.length ? '' : '<span class="muted">(không tìm thấy — tìm thủ công bên dưới)</span>'}</h4>
       ${it.cands.map((cd, k) => candHtml(it, cd, k)).join('')}
-      ${it.sel >= 0 ? '<button class="link small" data-do="unsel">Bỏ chọn nhóm (không đề xuất giá tự động)</button>' : ''}
+      ${it.sel >= 0 ? '<button class="link small" data-do="unsel">Không dùng nhóm nào làm tham khảo</button>' : ''}
       <h4>Tìm nhóm khác trong CSDL</h4>
-      <div class="row-in"><input type="search" id="dw-q" placeholder="vd: bê tông lót móng M150" value=""><button class="btn sm" data-do="search">Tìm</button></div>
+      <div class="row-in"><input type="search" id="dw-q" placeholder="vd: bê tông lót móng M150"><button class="btn sm" data-do="search">Tìm</button></div>
       <div id="dw-sr"></div>`;
-    if (c.st) {
+    if (c.shown) {
       const ids = [...c.st.ids].sort((a, b) => (IX.C.y[b] || 0) - (IX.C.y[a] || 0)).slice(0, 60);
-      h += `<h4>Báo giá dùng để tính (${c.st.n}${c.st.n > ids.length ? `, hiện ${ids.length} mới nhất` : ''})</h4>
+      h += `<h4>Báo giá tham khảo (${c.st.n}${c.st.n > ids.length ? `, hiện ${ids.length} mới nhất` : ''})</h4>
         <div class="tbl-wrap"><table class="refs"><thead><tr><th>Năm</th>${ADMIN ? '<th>Dự án</th>' : ''}<th>Tỉnh/TP</th><th>Tên trong báo giá</th><th class="num">Giá quy đổi</th><th class="num">Giá gốc</th></tr></thead><tbody>
         ${ids.map(i => { const p = projOf(i); return `<tr><td>${IX.C.y[i] || ''}</td>${ADMIN ? `<td>${esc(p[1] || p[0] || '')}</td>` : ''}<td>${esc(p[4] || p[3] || '')}</td><td>${esc(IX.C.name[i])}</td><td class="num">${fmt(IX.price(i) * c.cand.ratio * o.factor)}</td><td class="num small">${fmt(IX.C.tot[i])} /${esc(IX.unitOf(i))}</td></tr>`; }).join('')}
         </tbody></table></div>`;
@@ -419,159 +444,159 @@
   }
   function drawerAction(e) {
     const it = S.view.cur; if (!it) return;
-    const cand = e.target.closest('.cand');
-    if (cand && cand.dataset.k !== undefined) { it.sel = +cand.dataset.k; return refreshItem(it); }
+    const cand = e.target.closest('.cand[data-k]');
+    if (cand) { it.sel = +cand.dataset.k; return refreshItem(it); }
     const sr = e.target.closest('[data-g]');
     if (sr) {
       const gid = +sr.dataset.g;
       let k = it.cands.findIndex(x => x.g === gid);
       if (k < 0) { it.cands.unshift(manualCand(gid, it.unit)); k = 0; }
+      else it.cands[k] = { ...it.cands[k], picked: true };
       it.sel = k; return refreshItem(it);
     }
-    const act = e.target.dataset.do;
+    const act = e.target.dataset && e.target.dataset.do;
     if (act === 'apply') {
-      const m = $('#dw-manual').value.trim(), b = $('#dw-base').value.trim();
-      it.manual = m === '' ? null : +m; it.baseManual = b === '' ? null : +b;
-      it.note = $('#dw-note').value; it.skip = $('#dw-skip').checked;
+      const b = $('#dw-base').value.trim();
+      it.baseManual = b === '' ? null : +b; it.note = $('#dw-note').value.trim(); it.skip = $('#dw-skip').checked;
       return refreshItem(it);
     }
     if (act === 'unsel') { it.sel = -1; return refreshItem(it); }
     if (act === 'search') return drawerSearch(it);
     if (act === 'prev' || act === 'next') {
       const list = visible().filter(l => l.kind === 'item'), k = list.indexOf(it);
-      const nx = list[k + (act === 'next' ? 1 : -1)];
-      if (nx) openDrawer(nx);
+      openDrawer(list[k + (act === 'next' ? 1 : -1)]);
     }
   }
   function drawerSearch(it) {
     const q = $('#dw-q').value.trim(); if (!q) return;
     const res = DXG.match(IX, { desc: q, unit: it.unit, ctx: '' }, { limit: 12 });
     $('#dw-sr').innerHTML = res.length ? res.map(r => {
-      const g = IX.groups[r.g], st = stats(r.g, r.ratio);
-      return `<div class="cand" data-g="${r.g}"><span>＋</span><div><div class="nm">${esc(g.name)}</div><div class="small muted">ĐV ${esc(g.unit)}${r.unitOk === false ? ' · <b class="d-hi">khác đơn vị</b>' : ''} · ${st.n} báo giá · ${st.proj} dự án</div></div><div class="num"><b>${fmt(st.med * S.opt.factor)}</b><div class="price-sub">${fmt(st.p25 * S.opt.factor)} – ${fmt(st.p75 * S.opt.factor)}</div></div></div>`;
+      const g = IX.groups[r.g], st = stats(r.g, r.ratio), f = S.opt.factor;
+      return `<div class="cand" data-g="${r.g}"><span>＋</span><div><div class="nm">${esc(g.name)}</div><div class="small muted">ĐV ${esc(g.unit)}${r.unitOk === false ? ' · <b class="d-hi">khác đơn vị</b>' : ''} · ${st.n} báo giá · ${st.proj} dự án</div></div><div class="num"><b>${fmt(st.med * f)}</b><div class="price-sub">${fmt(st.p25 * f)} – ${fmt(st.p75 * f)}</div></div></div>`;
     }).join('') : '<div class="muted small">Không tìm thấy nhóm nào.</div>';
   }
   function refreshItem(it) {
     calc(it); renderKpis();
     const tr = $(`#res-tbl tr[data-id="${CSS.escape(it.id)}"]`);
-    if (tr) { tr.outerHTML = rowHtml(it); }
+    if (tr) tr.outerHTML = rowHtml(it);
     renderDrawer(it);
   }
 
   /* ---------- Tổng hợp ---------- */
+  function groupBy(keyFn) {
+    const m = new Map();
+    for (const it of S.items) { if (it.skip) continue; const k = keyFn(it); if (!m.has(k)) m.set(k, []); m.get(k).push(it); }
+    return [...m.entries()].map(([k, items]) => ({ k, ...totals(items) }));
+  }
   function renderSummary() {
-    const o = S.opt, by = (keyFn) => {
-      const m = new Map();
-      for (const it of S.items) { if (it.skip) continue; const k = keyFn(it); if (!m.has(k)) m.set(k, []); m.get(k).push(it); }
-      return [...m.entries()].map(([k, items]) => ({ k, ...totals(items) }));
-    };
-    const tbl = (rows, label) => `<div class="tbl-wrap"><table><thead><tr><th>${label}</th><th class="num">Dòng</th><th class="num">Đã có giá</th><th class="num">Tổng đề xuất</th><th class="num">Tổng baseline</th><th class="num">Lệch (dòng có cả 2 giá)</th><th class="num">%</th></tr></thead><tbody>
-      ${rows.map(r => { const d = r.baseBoth ? (r.amtBoth - r.baseBoth) / r.baseBoth : null, lv = d === null ? '' : Math.abs(d) <= o.tol1 ? 'ok' : Math.abs(d) <= o.tol2 ? 'lo' : 'hi';
-        return `<tr><td>${esc(r.k)}</td><td class="num">${NF.format(r.n)}</td><td class="num">${NF.format(r.priced)}</td><td class="num">${fmt(r.amt)}</td><td class="num">${r.baseAmt ? fmt(r.baseAmt) : ''}</td><td class="num d-${lv}">${r.both ? fmt(r.amtBoth - r.baseBoth) : ''}</td><td class="num d-${lv}">${pct(d)}</td></tr>`; }).join('')}
+    const o = S.opt;
+    const tbl = (rows, label) => `<div class="tbl-wrap"><table><thead><tr><th>${label}</th><th class="num">Dòng</th><th class="num">Hợp lý</th><th class="num">Cần xem</th><th class="num">Bất thường</th><th class="num">Chưa có TK</th><th class="num">Tổng giá trị QS</th><th class="num">QS / P50</th><th class="num">QS / baseline</th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td>${esc(r.k)}</td><td class="num">${NF.format(r.n)}</td><td class="num">${r.ev.ok}</td><td class="num">${r.ev.xem}</td><td class="num ${r.ev.bt ? 'd-hi' : ''}">${r.ev.bt}</td><td class="num">${r.ev.notk}</td><td class="num">${fmt(r.amtQs)}</td>
+        <td class="num">${r.ref ? pct((r.qsRef - r.ref) / r.ref) : ''}</td><td class="num">${r.base ? pct((r.qsBase - r.base) / r.base) : ''}</td></tr>`).join('')}
       </tbody></table></div>`;
-    const withB = S.items.filter(it => !it.skip && it.c.dev);
-    const cnt = { ok: 0, loU: 0, loD: 0, hiU: 0, hiD: 0 };
-    for (const it of withB) { const lv = it.c.devLvl, up = it.c.dev.d > 0; if (lv === 'ok') cnt.ok++; else if (lv === 'lo') cnt[up ? 'loU' : 'loD']++; else cnt[up ? 'hiU' : 'hiD']++; }
-    const noB = S.items.filter(it => !it.skip && !isNum(it.c.base)).length;
-    const tot = withB.length + noB || 1;
+    const t = totals(S.items), tot = t.n || 1;
     const seg = (n, cls, title) => n ? `<span class="${cls}" style="width:${n / tot * 100}%" title="${esc(title)}: ${n}"></span>` : '';
-    const pos = { lo: 0, mid: 0, hi: 0 };
-    for (const it of S.items) { const p = it.c.prank; if (p === null || it.skip) continue; if (p < 0.25) pos.lo++; else if (p > 0.75) pos.hi++; else pos.mid++; }
-    const top = withB.filter(it => isNum(it.c.dev.amt)).sort((a, b) => Math.abs(b.c.dev.amt) - Math.abs(a.c.dev.amt)).slice(0, 15);
+    // Dòng cần QS chú ý nhất: bất thường xếp theo giá trị chênh với P50
+    const watch = S.items.filter(it => !it.skip && (it.c.ev === 'bt' || it.c.devHi) && isNum(it.c.amtQs))
+      .map(it => ({ it, d: isNum(it.c.amtRef) ? it.c.amtQs - it.c.amtRef : 0 })).sort((a, b) => Math.abs(b.d) - Math.abs(a.d)).slice(0, 15);
     $('#tab-sum').innerHTML = `<div class="sum-grid">
-      <div class="card"><h3>Phân bố lệch giá đề xuất so với baseline</h3>
-        <div class="distbar">${seg(cnt.ok, 'c-ok', 'Trong ngưỡng')}${seg(cnt.loU + cnt.loD, 'c-lo', 'Lệch vừa')}${seg(cnt.hiU + cnt.hiD, 'c-hi', 'Lệch lớn')}${seg(noB, 'c-na', 'Chưa có baseline')}</div>
-        <div class="legend"><span><i class="c-ok"></i>|lệch| ≤ ${Math.round(o.tol1 * 100)}%: ${cnt.ok}</span><span><i class="c-lo"></i>${Math.round(o.tol1 * 100)}–${Math.round(o.tol2 * 100)}%: ${cnt.loU} cao hơn · ${cnt.loD} thấp hơn</span><span><i class="c-hi"></i>> ${Math.round(o.tol2 * 100)}%: ${cnt.hiU} cao hơn · ${cnt.hiD} thấp hơn</span><span><i class="c-na"></i>chưa có baseline: ${noB}</span></div>
-        <h3 style="margin-top:16px">Baseline so với giá thị trường (CSDL)</h3>
-        <div class="legend"><span>Thấp hơn P25: <b>${pos.lo}</b> dòng</span><span>Trong P25–P75: <b>${pos.mid}</b></span><span>Cao hơn P75: <b>${pos.hi}</b></span></div>
-        <p class="small muted">Baseline thấp hơn P25 → rủi ro thiếu ngân sách; cao hơn P75 → có dư địa đàm phán.</p></div>
-      <div class="card"><h3>15 dòng chênh lệch lớn nhất (theo thành tiền)</h3>
-        <div class="tbl-wrap"><table><thead><tr><th>Mô tả</th><th class="num">Đề xuất</th><th class="num">Baseline</th><th class="num">%</th><th class="num">Lệch tiền</th></tr></thead><tbody>
-        ${top.map(it => `<tr data-id="${esc(it.id)}" class="jump"><td>${esc(it.desc.slice(0, 80))}</td><td class="num">${fmt(it.c.price)}</td><td class="num">${fmt(it.c.base)}</td><td class="num d-${it.c.devLvl}">${pct(it.c.dev.pct)}</td><td class="num d-${it.c.devLvl}">${fmt(it.c.dev.amt)}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Chưa có dòng nào có cả giá đề xuất và baseline.</td></tr>'}
+      <div class="card"><h3>Đánh giá giá QS so với CSDL</h3>
+        <div class="distbar">${seg(t.ev.ok, 'c-ok', 'Hợp lý')}${seg(t.ev.xem, 'c-lo', 'Cần xem')}${seg(t.ev.bt, 'c-hi', 'Bất thường')}${seg(t.ev.nogia + t.ev.notk, 'c-na', 'Chưa có giá / tham khảo')}</div>
+        <div class="legend"><span><i class="c-ok"></i>Hợp lý (P25–P75): ${t.ev.ok}</span><span><i class="c-lo"></i>Cần xem: ${t.ev.xem}</span><span><i class="c-hi"></i>Bất thường (&lt;P10, &gt;P90): ${t.ev.bt}</span><span><i class="c-na"></i>Chưa có giá QS: ${t.ev.nogia} · không có tham khảo: ${t.ev.notk}</span></div>
+        <p class="small muted">Đánh giá chỉ để QS tham khảo. Giá lệch khỏi CSDL có thể đúng do điều kiện riêng của dự án — QS ghi lý do vào ý kiến.</p></div>
+      <div class="card"><h3>Dòng nên rà soát (bất thường hoặc lệch baseline &gt; ${Math.round(o.tolBl * 100)}%)</h3>
+        <div class="tbl-wrap"><table><thead><tr><th>Mô tả</th><th class="num">Giá QS</th><th class="num">P50</th><th class="num">Vị trí</th><th class="num">QS / BL</th><th class="num">Chênh TT vs P50</th></tr></thead><tbody>
+        ${watch.map(({ it, d }) => `<tr data-id="${esc(it.id)}" class="jump"><td>${esc(it.desc.slice(0, 70))}</td><td class="num">${fmt(it.c.qs)}</td><td class="num">${it.c.ref ? fmt(it.c.ref.p50) : ''}</td><td class="num">${esc(it.c.zone)}</td><td class="num ${it.c.devHi ? 'd-hi' : ''}">${it.c.dev ? pct(it.c.dev.pct) : ''}</td><td class="num">${d ? fmt(d) : ''}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Không có dòng nào cần rà soát.</td></tr>'}
         </tbody></table></div></div>
     </div>
-    <div class="card"><h3>Theo sheet</h3>${tbl(by(it => it.sheet), 'Sheet')}</div>
-    <div class="card"><h3>Theo hạng mục cấp 1</h3>${tbl(by(it => `${it.sheet} · ${it.heads[0] || '(không có tiêu đề)'}`), 'Hạng mục')}</div>`;
+    <div class="card"><h3>Theo sheet</h3>${tbl(groupBy(it => it.sheet), 'Sheet')}</div>
+    <div class="card"><h3>Theo hạng mục cấp 1</h3>${tbl(groupBy(it => `${it.sheet} · ${it.heads[0] || '(không có tiêu đề)'}`), 'Hạng mục')}</div>`;
   }
 
-  /* ---------- Xuất Excel ---------- */
+  /* ---------- Xuất Excel: chỉ THÊM sheet TK_*, không đụng sheet BOQ gốc ---------- */
+  const sheetRef = name => `'${name.replace(/'/g, "''")}'!`;
+  const C = c => XLSXIO.colName(c);
   async function exportXlsx(opt) {
-    const wb = S.wb, o = S.opt;
+    const wb = S.wb;
     const st = {
       head: wb.style({ bold: true, fill: 'FFDDEBF7', border: true, wrap: true }),
-      num: wb.style({ numFmt: '#,##0', border: true }), pct: wb.style({ numFmt: '0.0%', border: true }), txt: wb.style({ border: true }),
-      ok: wb.style({ numFmt: '0.0%', border: true, fill: 'FFE2F0D9' }), lo: wb.style({ numFmt: '0.0%', border: true, fill: 'FFFFF2CC' }), hi: wb.style({ numFmt: '0.0%', border: true, fill: 'FFF8CBAD', bold: true }),
-      bold: wb.style({ bold: true, border: true }), boldNum: wb.style({ bold: true, numFmt: '#,##0', border: true }),
-      title: wb.style({ bold: true }),
+      num: wb.style({ numFmt: '#,##0', border: true }), qty: wb.style({ numFmt: '#,##0.00', border: true }),
+      pct: wb.style({ numFmt: '0.0%', border: true }), txt: wb.style({ border: true }), wrap: wb.style({ border: true, wrap: true }),
+      ref: wb.style({ numFmt: '#,##0', border: true, fill: 'FFF2F2F2' }), qs: wb.style({ numFmt: '#,##0', border: true, bold: true }),
+      link: wb.style({ border: true, color: 'FF0563C1' }), title: wb.style({ bold: true }), bold: wb.style({ bold: true, border: true }), note: wb.style({ italic: true, color: 'FF595959' }),
     };
-    const C = XLSXIO.colName;
-    let written = 0;
-    for (const sh of S.sheets.filter(s => s.include)) {
-      const items = S.items.filter(it => it.sh === sh);
-      if (!items.length) continue;
-      const { cols } = sh.det, si = sh.si;
-      const width = Math.max(...sh.grid.map(r => r.length), ...Object.values(cols).map(c => c + 1));
-      const A0 = width + 1;   // chừa 1 cột trống
-      if (opt.cols) {
-        const heads = ['ĐG đề xuất', 'P25', 'P75', 'Số báo giá', 'Tin cậy', 'Nhóm khớp trong CSDL', 'Baseline', 'Lệch ĐG', 'Lệch %', 'Lệch thành tiền'];
-        heads.forEach((h, k) => { wb.set(si, sh.det.headerRow, A0 + k, h, { s: st.head }); wb.setColWidth(si, A0 + k, k === 5 ? 42 : 14); });
-      }
-      for (const it of items) {
-        const c = it.c, r = it.r;
-        const p = it.skip ? null : c.price;
-        if (isNum(p)) {
-          let rateOk = false;
-          if (opt.rate !== 'no' && cols.rate !== undefined && !wb.hasFormula(si, r, cols.rate)) {
-            if (opt.rate === 'all' || !isNum(it.rate)) { wb.set(si, r, cols.rate, p); written++; rateOk = true; }
-          }
-          if (cols.rate !== undefined && (rateOk || isNum(it.rate) || wb.hasFormula(si, r, cols.rate))) rateOk = true;
-          if (opt.split && c.st && c.st.matShare !== null && cols.mat !== undefined && cols.lab !== undefined && rateOk) {
-            const vMat = (sh.grid[r] || [])[cols.mat], vLab = (sh.grid[r] || [])[cols.lab];
-            if (!isNum(vMat) && !isNum(vLab) && !wb.hasFormula(si, r, cols.mat) && !wb.hasFormula(si, r, cols.lab)) {
-              wb.set(si, r, cols.mat, Math.round(p * c.st.matShare)); wb.set(si, r, cols.lab, Math.round(p * c.st.labShare));
-            }
-          }
-          if (opt.amount && cols.amount !== undefined) {
-            if (wb.hasFormula(si, r, cols.amount)) wb.dropCache(si, r, cols.amount);
-            else if (!isNum(it.amount) && cols.qty !== undefined && rateOk) wb.set(si, r, cols.amount, null, { f: `${C(cols.qty)}${r + 1}*${C(cols.rate)}${r + 1}` });
-          }
-        }
-        if (opt.cols) {
-          const g = c.shown ? IX.groups[c.cand.g] : null, ok = g && c.st && !it.skip;
-          const vals = [
-            [p, st.num], [ok ? Math.round(c.low) : null, st.num], [ok ? Math.round(c.high) : null, st.num], [ok ? c.st.n : null, st.num],
-            [it.skip ? 'Bỏ qua' : c.src === 'manual' ? 'Sửa tay' : LEVEL[c.conf.level], st.txt], [g ? g.name : '', st.txt],
-            [c.base, st.num], [c.dev ? Math.round(c.dev.d) : null, st.num], [c.dev ? c.dev.pct : null, c.devLvl ? st[c.devLvl] : st.pct], [c.dev && isNum(c.dev.amt) ? Math.round(c.dev.amt) : null, st.num],
-          ];
-          vals.forEach(([v, s], k) => wb.set(si, r, A0 + k, v ?? null, { s }));
-        }
-      }
-    }
-    if (opt.sheets) { wb.putSheet('DX_TongHop', summaryRows(st), { widths: [46, 12, 12, 20, 20, 20, 10], freeze: 0 }); wb.putSheet('DX_ChiTiet', detailRows(st), { widths: [16, 8, 10, 60, 8, 12, 14, 14, 14, 16, 12, 44, 10, 10, 14, 12, 14, 10, 18, 30], freeze: 1, filter: 1 }); }
-    if (opt.ref && ADMIN) wb.putSheet('DX_ThamChieu', refRows(st), { widths: [16, 8, 50, 8, 34, 50, 14, 14, 10], freeze: 1, filter: 1 });
-    wb.forceRecalc();
+    const dx = {
+      ok: wb.dxf({ fill: 'FFE2F0D9', color: 'FF1F6B3A' }), xem: wb.dxf({ fill: 'FFFFF2CC', color: 'FF7F6000' }),
+      bt: wb.dxf({ fill: 'FFF8CBAD', color: 'FF9C0006', bold: true }), dev: wb.dxf({ color: 'FF9C0006', bold: true }),
+    };
+    wb.putSheet('TK_DanhGia', evalRows(st), {
+      widths: [14, 7, 26, 8, 48, 7, 11, 40, 8, 11, 7, 7, 8, 12, 12, 12, 12, 12, 13, 10, 18, 13, 10, 16, 16, 30, 40],
+      freeze: 1, filter: 1,
+      cf: [
+        { sqref: `U2:U${S.items.length + 1}`, rules: [{ formula: 'U2="Hợp lý"', dxf: dx.ok }, { formula: 'U2="Cần xem"', dxf: dx.xem }, { formula: 'U2="Bất thường"', dxf: dx.bt }] },
+        { sqref: `W2:W${S.items.length + 1}`, rules: [{ formula: `AND(ISNUMBER(W2),ABS(W2)>${S.opt.tolBl})`, dxf: dx.dev }] },
+      ],
+    });
+    if (opt.sum) wb.putSheet('TK_TongHop', summaryRows(st), { widths: [46, 9, 9, 9, 11, 11, 18, 11, 11] });
+    if (opt.ref && ADMIN) wb.putSheet('TK_NguonGia', sourceRows(st), { widths: [14, 7, 50, 8, 34, 50, 14, 14, 10], freeze: 1, filter: 1 });
     const blob = await wb.save();
-    download(blob, S.fileName.replace(/\.(xlsx|xlsm)$/i, '') + '_DeXuatGia.xlsx');
-    // Đọc lại file gốc để lần xuất sau không chồng thay đổi
+    download(blob, S.fileName.replace(/\.(xlsx|xlsm)$/i, '') + '_ThamKhaoGia.xlsx');
     S.wb = await XLSXIO.read(await blob.arrayBuffer());
-    return written;
   }
+  // Sheet đánh giá: 1 dòng / hạng mục BOQ. Giá QS, KL là công thức trỏ về sheet gốc → tự cập nhật khi QS sửa giá.
+  function evalRows(st) {
+    const H = ['Sheet', 'Dòng', 'Hạng mục', 'Mã', 'Mô tả', 'ĐV', 'KL', 'Nhóm tham khảo trong CSDL', 'ĐV nhóm', 'Độ phù hợp', 'Số BG', 'Số DA', 'Năm gần nhất',
+      'P10', 'P25', 'P50 (giá TK)', 'P75', 'P90', 'Giá QS', 'Vị trí', 'Đánh giá', 'Baseline', 'QS / Baseline', 'Thành tiền QS', 'Thành tiền theo P50', 'Lưu ý dữ liệu', 'Ý kiến QS / tư vấn'];
+    const rows = [H.map(v => ({ v, s: st.head }))];
+    S.items.forEach((it, k) => {
+      const c = it.c, x = k + 2, cols = it.sh.det.cols, sr = sheetRef(it.sheet), er = it.r + 1;
+      const g = c.shown ? IX.groups[c.cand.g] : null, R = c.ref;
+      const cell = col => `${sr}${C(col)}${er}`;
+      const qtyF = cols.qty !== undefined ? `IF(ISNUMBER(${cell(cols.qty)}),${cell(cols.qty)},"")` : null;
+      const qsF = cols.rate !== undefined ? `IF(ISNUMBER(${cell(cols.rate)}),IF(${cell(cols.rate)}=0,"",${cell(cols.rate)}),"")`
+        : (cols.amount !== undefined && cols.qty !== undefined ? `IFERROR(IF(${cell(cols.amount)}/${cell(cols.qty)}=0,"",${cell(cols.amount)}/${cell(cols.qty)}),"")` : null);
+      const num = v => isNum(v) ? Math.round(v) : null;
+      const S_ = `S${x}`, N_ = `N${x}`, O_ = `O${x}`, P_ = `P${x}`, Q_ = `Q${x}`, R_ = `R${x}`;
+      const evalF = it.skip ? null : `IF(${P_}="","${EVAL.notk}",IF(${S_}="","${EVAL.nogia}",IF(OR(${S_}<${N_},${S_}>${R_}),"${EVAL.bt}",IF(OR(${S_}<${O_},${S_}>${Q_}),"${EVAL.xem}","${EVAL.ok}"))))`;
+      rows.push([
+        { v: it.sheet, s: st.txt },
+        { f: `HYPERLINK("#${sr}A${er}",${er})`, v: er, s: st.link },
+        { v: it.heads[0] || '', s: st.txt }, { v: it.code, s: st.txt }, { v: it.desc, s: st.wrap }, { v: it.unit, s: st.txt },
+        qtyF ? { f: qtyF, v: isNum(it.qty) ? it.qty : '', s: st.qty } : { v: it.qty, s: st.qty },
+        { v: g ? g.name : '', s: st.wrap }, { v: g ? g.unit : '', s: st.txt },
+        { v: !c.cand ? 'Không khớp' : c.cand.picked ? 'QS chọn' : FIT[c.fit.level], s: st.txt },
+        { v: g ? c.st.n : null, s: st.num }, { v: g ? c.st.proj : null, s: st.num }, { v: g ? c.st.latest || null : null, s: st.txt },
+        { v: R ? num(R.p10) : null, s: st.ref }, { v: R ? num(R.p25) : null, s: st.ref }, { v: R ? num(R.p50) : null, s: st.ref }, { v: R ? num(R.p75) : null, s: st.ref }, { v: R ? num(R.p90) : null, s: st.ref },
+        qsF ? { f: qsF, v: isNum(c.qs) ? c.qs : '', s: st.qs } : { v: null, s: st.qs },
+        { f: `IF(OR(${S_}="",${P_}=""),"",IF(${S_}<${N_},"< P10",IF(${S_}<${O_},"P10–P25",IF(${S_}<=${Q_},"P25–P75",IF(${S_}<=${R_},"P75–P90","> P90")))))`, v: c.zone, s: st.txt },
+        evalF ? { f: evalF, v: EVAL[c.ev], s: st.txt } : { v: EVAL.skip, s: st.txt },
+        { v: isNum(c.base) ? c.base : null, s: st.num },
+        { f: `IF(OR(${S_}="",V${x}=""),"",${S_}/V${x}-1)`, v: c.dev && isNum(c.dev.pct) ? c.dev.pct : '', s: st.pct },
+        { f: `IF(OR(${S_}="",G${x}=""),"",${S_}*G${x})`, v: isNum(c.amtQs) ? c.amtQs : '', s: st.num },
+        { f: `IF(OR(${P_}="",G${x}=""),"",${P_}*G${x})`, v: isNum(c.amtRef) ? c.amtRef : '', s: st.num },
+        { v: c.notes.join(' · '), s: st.wrap }, { v: it.note, s: st.wrap },
+      ]);
+    });
+    return rows;
+  }
+  // Tổng hợp: số liệu tại thời điểm xuất (sheet TK_DanhGia mới là bảng cập nhật trực tiếp)
   function summaryRows(st) {
-    const o = S.opt, t = totals(S.items), H = v => ({ v, s: st.head }), N = v => ({ v: isNum(v) ? Math.round(v) : null, s: st.num }), T = v => ({ v, s: st.txt });
-    const P = v => ({ v, s: st.pct });
+    const o = S.opt, t = totals(S.items), H = v => ({ v, s: st.head }), N = v => ({ v: isNum(v) ? Math.round(v) : null, s: st.num }), T = v => ({ v, s: st.txt }), P = v => ({ v: v, s: st.pct });
     const rows = [
-      [{ v: `ĐỀ XUẤT GIÁ BOQ — ${S.fileName}`, s: st.title }],
+      [{ v: `THAM KHẢO & ĐÁNH GIÁ GIÁ BOQ — ${S.fileName}`, s: st.title }],
       [`Lập lúc ${new Date().toLocaleString('vi-VN', { hour12: false })}${window.SECURE ? ' · ' + window.SECURE.name : ''}`],
-      [`Cách chọn giá: ${DXG.STRATEGY[o.strategy].label} · hệ số ${Math.round(o.factor * 1000) / 10}% · năm ${o.yearFrom || '…'}–${o.yearTo || '…'} · loại hình: ${[...o.types].join(', ') || 'tất cả'} · tỉnh: ${[...o.provs].join(', ') || 'tất cả'} · giá quy về ${window.DB.baseYear || 2026}`],
-      [`Baseline: ${S.baseName || (t.baseAmt ? 'cột baseline trong BOQ' : 'chưa có')} · ngưỡng lệch ${Math.round(o.tol1 * 100)}% / ${Math.round(o.tol2 * 100)}%`],
+      [`CSDL: giá quy về ${window.DB.baseYear || 2026} · hệ số ${Math.round(o.factor * 1000) / 10}% · năm ${o.yearFrom || '…'}–${o.yearTo || '…'} · loại hình: ${[...o.types].join(', ') || 'tất cả'} · tỉnh: ${[...o.provs].join(', ') || 'tất cả'}`],
+      [`Baseline: ${S.baseName || (t.base ? 'cột baseline trong BOQ' : 'chưa có')} · ngưỡng lệch ${Math.round(o.tolBl * 100)}%`],
+      [{ v: 'Giá do QS lập. CSDL chỉ dùng để tham khảo. Bảng dưới là số liệu tại thời điểm xuất; sheet TK_DanhGia tự cập nhật khi QS sửa giá trong các sheet BOQ.', s: st.note }],
       [],
       [H('Chỉ tiêu'), H('Giá trị')],
-      [T('Số dòng hạng mục'), N(t.n)], [T('Số dòng đã có giá'), N(t.priced)],
-      [T('Tin cậy cao / TB / thấp / không khớp'), T(`${t.lv.cao} / ${t.lv.tb} / ${t.lv.thap} / ${t.lv.none}`)],
-      [T('Tổng giá trị đề xuất (VNĐ)'), N(t.amt)], [T('Tổng baseline (VNĐ)'), N(t.baseAmt)],
-      [T('Chênh lệch trên dòng có cả 2 giá (VNĐ)'), N(t.both ? t.amtBoth - t.baseBoth : null)], [T('Chênh lệch %'), P(t.baseBoth ? (t.amtBoth - t.baseBoth) / t.baseBoth : null)],
+      [T('Số dòng hạng mục'), N(t.n)], [T('Có giá tham khảo CSDL'), N(t.tk)], [T('QS đã có giá'), N(t.qs)],
+      [T('Hợp lý / Cần xem / Bất thường'), T(`${t.ev.ok} / ${t.ev.xem} / ${t.ev.bt}`)],
+      [T('Tổng giá trị QS (VNĐ)'), N(t.amtQs)],
+      [T('QS so với P50 CSDL (trên dòng có cả 2)'), P(t.ref ? (t.qsRef - t.ref) / t.ref : null)],
+      [T('QS so với baseline (trên dòng có cả 2)'), P(t.base ? (t.qsBase - t.base) / t.base : null)],
       [],
-      [H('Sheet / Hạng mục cấp 1'), H('Số dòng'), H('Đã có giá'), H('Tổng đề xuất'), H('Tổng baseline'), H('Lệch (dòng có 2 giá)'), H('Lệch %')],
+      [H('Sheet / Hạng mục cấp 1'), H('Dòng'), H('Hợp lý'), H('Cần xem'), H('Bất thường'), H('Chưa có TK'), H('Tổng giá trị QS'), H('QS / P50'), H('QS / baseline')],
     ];
     const groups = new Map();
     for (const it of S.items) {
@@ -580,28 +605,16 @@
     }
     for (const [k, items] of groups) {
       const x = totals(items), bold = !k.startsWith('   ');
-      rows.push([{ v: k, s: bold ? st.bold : st.txt }, N(x.n), N(x.priced), { v: Math.round(x.amt), s: bold ? st.boldNum : st.num }, N(x.baseAmt || null), N(x.both ? x.amtBoth - x.baseBoth : null), P(x.baseBoth ? (x.amtBoth - x.baseBoth) / x.baseBoth : null)]);
+      rows.push([{ v: k, s: bold ? st.bold : st.txt }, N(x.n), N(x.ev.ok), N(x.ev.xem), N(x.ev.bt), N(x.ev.notk), N(x.amtQs), P(x.ref ? (x.qsRef - x.ref) / x.ref : null), P(x.base ? (x.qsBase - x.base) / x.base : null)]);
     }
     return rows;
   }
-  function detailRows(st) {
-    const H = ['Sheet', 'Dòng', 'Mã', 'Mô tả', 'ĐV', 'KL', 'ĐG trong file', 'ĐG đề xuất', 'Thành tiền đề xuất', 'Nguồn giá', 'Tin cậy', 'Nhóm khớp', 'ĐV nhóm', 'Số BG', 'P25', 'P75', 'Baseline', 'Lệch %', 'Lệch thành tiền', 'Ghi chú / Hạng mục cha'];
-    const rows = [H.map(v => ({ v, s: st.head }))];
-    for (const it of S.items) {
-      const c = it.c, g = c.shown ? IX.groups[c.cand.g] : null, ok = g && c.st;
-      rows.push([it.sheet, it.r + 1, it.code, it.desc, it.unit, it.qty, it.rate, { v: it.skip ? null : c.price, s: st.num }, { v: it.skip || !isNum(c.amount) ? null : Math.round(c.amount), s: st.num },
-        it.skip ? 'bỏ qua' : c.src === 'manual' ? 'sửa tay' : c.src === 'auto' ? 'CSDL' : 'chưa có', LEVEL[c.conf.level], g ? g.name : '', g ? g.unit : '', ok ? c.st.n : null,
-        { v: ok ? Math.round(c.low) : null, s: st.num }, { v: ok ? Math.round(c.high) : null, s: st.num }, { v: c.base, s: st.num },
-        { v: c.dev ? c.dev.pct : null, s: c.devLvl ? st[c.devLvl] : st.pct }, { v: c.dev && isNum(c.dev.amt) ? Math.round(c.dev.amt) : null, s: st.num }, [it.note, it.ctx].filter(Boolean).join(' | ')]);
-    }
-    return rows;
-  }
-  function refRows(st) {
+  function sourceRows(st) {
     const rows = [['Sheet', 'Dòng', 'Mô tả BOQ', 'Năm', 'Dự án', 'Tên trong báo giá', 'Giá quy đổi', 'Giá gốc', 'ĐV gốc'].map(v => ({ v, s: st.head }))];
     for (const it of S.items) {
-      const c = it.c; if (!c.shown || !c.st || it.skip) continue;
+      const c = it.c; if (!c.shown || it.skip) continue;
       const ids = [...c.st.ids].sort((a, b) => (IX.C.y[b] || 0) - (IX.C.y[a] || 0)).slice(0, 10);
-      for (const i of ids) { const p = projOf(i); rows.push([it.sheet, it.r + 1, it.desc, IX.C.y[i] || null, p[1] || p[0] || '', IX.C.name[i], { v: Math.round(IX.price(i) * c.cand.ratio), s: st.num }, { v: IX.C.tot[i], s: st.num }, IX.unitOf(i)]); }
+      for (const i of ids) { const p = projOf(i); rows.push([it.sheet, it.r + 1, it.desc, IX.C.y[i] || null, p[1] || p[0] || '', IX.C.name[i], { v: Math.round(IX.price(i) * c.cand.ratio * S.opt.factor), s: st.num }, { v: IX.C.tot[i], s: st.num }, IX.unitOf(i)]); }
     }
     return rows;
   }
@@ -611,15 +624,17 @@
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
-  function saveSession() {
+  function sessionData() {
     const o = S.opt;
-    const j = {
-      dinh_dang: 'DGBQ1', file: S.fileName, at: new Date().toISOString(),
+    return {
+      dinh_dang: 'DGBQ2', file: S.fileName, at: new Date().toISOString(),
       opt: { ...o, types: [...o.types], provs: [...o.provs] }, baseName: S.baseName, baseList: S.baseList,
-      items: S.items.filter(it => (it.cands[it.sel] && it.cands[it.sel].picked) || it.sel < 0 && it.cands.length || isNum(it.manual) || isNum(it.baseManual) || it.skip || it.note || it.sel > 0)
-        .map(it => ({ id: it.id, gkey: it.sel >= 0 ? IX.groups[it.cands[it.sel].g].key : null, manual: it.manual, baseManual: it.baseManual, skip: it.skip, note: it.note })),
+      items: S.items.filter(it => (it.cands[it.sel] && it.cands[it.sel].picked) || (it.sel < 0 && it.cands.length) || it.sel > 0 || isNum(it.baseManual) || it.skip || it.note)
+        .map(it => ({ id: it.id, gkey: it.sel >= 0 ? IX.groups[it.cands[it.sel].g].key : null, baseManual: it.baseManual, skip: it.skip, note: it.note })),
     };
-    download(new Blob([JSON.stringify(j)], { type: 'application/json' }), S.fileName.replace(/\.(xlsx|xlsm)$/i, '') + '.dgbq');
+  }
+  function saveSession() {
+    download(new Blob([JSON.stringify(sessionData())], { type: 'application/json' }), S.fileName.replace(/\.(xlsx|xlsm)$/i, '') + '.dgbq');
   }
 
   /* ---------- Sự kiện ---------- */
@@ -634,8 +649,8 @@
     onFile('#f-boq', loadBoq); onFile('#f-base', loadBase); onFile('#f-sess', loadSession);
     $('#map-tbl').addEventListener('change', onMapChange);
     $('#go').addEventListener('click', runAll);
-    for (const id of ['#o-strategy', '#o-yfrom', '#o-yto', '#o-factor', '#o-minconf', '#o-tol1', '#o-tol2', '#o-review', '#o-outlier', '#o-warn']) $(id).addEventListener('change', recompute);
-    $('#flt').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; setFilter(b.dataset.f); });
+    for (const id of ['#o-yfrom', '#o-yto', '#o-factor', '#o-tol', '#o-review', '#o-outlier', '#o-warn']) $(id).addEventListener('change', recompute);
+    $('#flt').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setFilter(b.dataset.f); });
     $('#kpis').addEventListener('click', e => { const k = e.target.closest('.kpi[data-f]'); if (k) { switchTab('lines'); setFilter(k.dataset.f); } });
     let tq; $('#flt-q').addEventListener('input', e => { clearTimeout(tq); tq = setTimeout(() => { S.view.q = e.target.value; S.view.shown = PAGE; renderTable(); }, 200); });
     $('#more').addEventListener('click', () => { S.view.shown += PAGE; renderTable(); });
@@ -643,7 +658,11 @@
     $('#tab-sum').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) openDrawer(S.items.find(it => it.id === tr.dataset.id)); });
     $('#dw-close').addEventListener('click', closeDrawer);
     $('#dw-body').addEventListener('click', drawerAction);
-    $('#dw-body').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'dw-q') { e.preventDefault(); drawerSearch(S.view.cur); } else if (e.key === 'Enter' && e.target.matches('input')) { e.preventDefault(); drawerAction({ target: { dataset: { do: 'apply' }, closest: () => null } }); } });
+    $('#dw-body').addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      if (e.target.id === 'dw-q') { e.preventDefault(); drawerSearch(S.view.cur); }
+      else if (e.target.id === 'dw-base') { e.preventDefault(); drawerAction({ target: { dataset: { do: 'apply' }, closest: () => null } }); }
+    });
     document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (!$('#dlg').hidden) $('#dlg').hidden = true; else closeDrawer(); } });
     $$('.tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     $('#save-sess').addEventListener('click', saveSession);
@@ -653,9 +672,9 @@
       e.preventDefault();
       const btn = $('#dlg-form button[type=submit]'); btn.disabled = true; btn.textContent = 'Đang tạo file…';
       try {
-        await exportXlsx({ rate: $('input[name=x-rate]:checked').value, amount: $('#x-amount').checked, split: $('#x-split').checked, cols: $('#x-cols').checked, sheets: $('#x-sheets').checked, ref: $('#x-ref').checked });
+        await exportXlsx({ sum: $('#x-sum').checked, ref: $('#x-ref').checked });
         $('#dlg').hidden = true;
-      } catch (ex) { console.error(ex); alert('Không xuất được file: ' + (ex.message || ex)); }
+      } catch (ex) { console.error(ex); msg('Không xuất được file: ' + (ex.message || ex), 'err'); $('#dlg').hidden = true; }
       btn.disabled = false; btn.textContent = 'Xuất file';
     });
   }

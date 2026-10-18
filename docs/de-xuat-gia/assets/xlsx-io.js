@@ -3,6 +3,7 @@
    • Giải nén bằng DecompressionStream('deflate-raw'), nén lại bằng CompressionStream.
    • Chỉ thay đúng các ô được ghi; style, ô gộp, công thức, sheet khác giữ nguyên.
    • Thêm style mới (đậm, nền màu, định dạng số) và thêm sheet mới vào workbook có sẵn.
+   Module tham khảo giá chỉ THÊM sheet mới: các sheet gốc không bị phân tích lại hay ghi lại, giữ nguyên từng byte.
    API: XLSXIO.read(ArrayBuffer) -> Promise<Workbook> */
 (function () {
   const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
@@ -139,7 +140,7 @@
       if (t === 'str') return v ? v.textContent : '';
       if (t === 'b') return v ? v.textContent === '1' : null;
       if (t === 'e') return null;
-      if (!v) return null;
+      if (!v || v.textContent === '') return null;   // công thức chưa có giá trị đệm
       const n = +v.textContent;
       return isFinite(n) ? n : v.textContent;
     }
@@ -325,6 +326,29 @@
       return id;
     }
 
+    // Định dạng dùng cho định dạng có điều kiện: { fill (ARGB nền), color (ARGB chữ), bold }
+    dxf(spec) {
+      const key = 'dxf' + JSON.stringify(spec);
+      this._styleCache = this._styleCache || new Map();
+      if (this._styleCache.has(key)) return this._styleCache.get(key);
+      if (!this.xml('xl/styles.xml')) this.style({});   // file chưa có styles.xml thì tạo
+      const doc = this.xml('xl/styles.xml'), ss = doc.documentElement;
+      let dx = kid(ss, 'dxfs');
+      if (!dx) {
+        dx = doc.createElementNS(NS, 'dxfs'); dx.setAttribute('count', '0');
+        let ref = null; for (const n of ['tableStyles', 'colors', 'extLst']) if ((ref = kid(ss, n))) break;
+        ss.insertBefore(dx, ref);
+      }
+      const xml = `<dxf>${spec.bold || spec.color ? `<font>${spec.bold ? '<b/>' : ''}${spec.color ? `<color rgb="${spec.color}"/>` : ''}</font>` : ''}${spec.fill ? `<fill><patternFill><bgColor rgb="${spec.fill}"/></patternFill></fill>` : ''}</dxf>`;
+      const frag = new DOMParser().parseFromString(`<x xmlns="${NS}">${xml}</x>`, 'application/xml').documentElement.firstChild;
+      dx.appendChild(doc.importNode(frag, true));
+      const id = kids(dx, 'dxf').length - 1;
+      dx.setAttribute('count', id + 1);
+      this.touch('xl/styles.xml');
+      this._styleCache.set(key, id);
+      return id;
+    }
+
     /* --- Thêm / thay sheet --- */
     // rows: mảng dòng; ô = giá trị hoặc {v, s, f}. o: { widths, freeze (số dòng cố định), filter }
     putSheet(name, rows, o = {}) {
@@ -360,7 +384,11 @@
           maxC = Math.max(maxC, ci);
           const s = x.s !== undefined ? ` s="${x.s}"` : '';
           const r = ref(ri, ci);
-          if (x.f) out.push(`<c r="${r}"${s}><f>${xesc(x.f)}</f></c>`);
+          if (x.f) {
+            // công thức kèm giá trị đệm (để file mở ra đã có số, Excel tự tính lại khi ô nguồn thay đổi)
+            const cv = typeof x.v === 'number' && isFinite(x.v) ? `<v>${x.v}</v>` : (typeof x.v === 'string' ? `<v>${xesc(x.v)}</v>` : '');
+            out.push(`<c r="${r}"${s}${typeof x.v === 'string' ? ' t="str"' : ''}><f>${xesc(x.f)}</f>${cv}</c>`);
+          }
           else if (typeof x.v === 'number' && isFinite(x.v)) out.push(`<c r="${r}"${s}><v>${x.v}</v></c>`);
           else if (x.v === null || x.v === undefined || x.v === '') out.push(`<c r="${r}"${s}/>`);
           else out.push(`<c r="${r}" t="inlineStr"${s}><is><t xml:space="preserve">${xesc(x.v)}</t></is></c>`);
@@ -369,6 +397,11 @@
       });
       out.push('</sheetData>');
       if (o.filter && rows.length > 1) out.push(`<autoFilter ref="A${o.filter}:${colName(maxC)}${rows.length}"/>`);
+      // o.cf: [{ sqref: 'U2:U90', rules: [{ formula: '$U2="Hợp lý"', dxf: id }] }]
+      let pr = 1;
+      for (const cf of o.cf || []) {
+        out.push(`<conditionalFormatting sqref="${cf.sqref}">` + cf.rules.map(ru => `<cfRule type="expression" dxfId="${ru.dxf}" priority="${pr++}"><formula>${xesc(ru.formula)}</formula></cfRule>`).join('') + '</conditionalFormatting>');
+      }
       out.push('</worksheet>');
       return out.join('');
     }

@@ -1,5 +1,5 @@
 'use strict';
-/* Lõi đề xuất giá BOQ — không phụ thuộc giao diện, chạy được cả trong trình duyệt (window.DXG) và Node (require).
+/* Lõi tham khảo giá BOQ — không phụ thuộc giao diện, chạy được cả trong trình duyệt (window.DXG) và Node (require).
    • Nhận diện cột / dòng hạng mục của bảng BOQ.
    • Khớp từng dòng BOQ với "nhóm đại diện" trong cơ sở dữ liệu đơn giá (window.DB, cùng định dạng với app tra cứu).
    • Thống kê giá nhóm (trung vị, P25–P75…) theo bộ lọc, đề xuất đơn giá và độ tin cậy.

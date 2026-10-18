@@ -80,8 +80,8 @@ async function run(browser, site, user, label) {
   const browser = await pw.chromium.launch();
   const a = await run(browser, path.join(ROOT, 'docs'), 'admin', 'admin');
   const b = await run(browser, nvMo, 'admin', 'nv-mo');   // bản nhân viên: tài khoản admin cũng chỉ có quyền nhân viên
-  if (!a.hasProj || !a.sheets.includes('DX_ThamChieu')) { console.error('admin phải thấy dự án + sheet tham chiếu'); process.exitCode = 1; }
-  if (b.hasProj || b.sheets.includes('DX_ThamChieu')) { console.error('nhân viên không được thấy dự án / sheet tham chiếu'); process.exitCode = 1; }
+  if (!a.hasProj || !a.sheets.includes('TK_NguonGia')) { console.error('admin phải thấy dự án + sheet tham chiếu'); process.exitCode = 1; }
+  if (b.hasProj || b.sheets.includes('TK_NguonGia')) { console.error('nhân viên không được thấy dự án / sheet tham chiếu'); process.exitCode = 1; }
   // tài khoản nhân viên mở bản admin: bị chặn
   {
     const srv = serve(path.join(ROOT, 'docs')), page = await browser.newPage();
