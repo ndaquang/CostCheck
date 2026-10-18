@@ -27,7 +27,7 @@
   const S = {
     wb: null, fileName: '', sheets: [], lines: [], items: [],
     baseList: null, baseName: '', session: null,
-    opt: { yearFrom: null, yearTo: null, types: new Set(), provs: new Set(), excludeReview: true, excludeOutlier: true, excludeWarn: false, factor: 1, tolBl: 0.10 },
+    opt: { yearFrom: null, yearTo: null, types: new Set(), provs: new Set(), excludeReview: true, excludeOutlier: true, excludeWarn: false, factor: 1, tolBl: 0.10, tolOk: 0.05, tolBt: 0.15 },
     view: { f: 'all', q: '', shown: PAGE, tab: 'lines', cur: null },
   };
 
@@ -85,12 +85,14 @@
     o.yearFrom = n('#o-yfrom'); o.yearTo = n('#o-yto');
     o.factor = (n('#o-factor') ?? 100) / 100;
     o.tolBl = (n('#o-tol') ?? 10) / 100;
+    o.tolOk = (n('#o-ok') ?? 5) / 100; o.tolBt = (n('#o-bt') ?? 15) / 100;
     o.excludeReview = $('#o-review').checked; o.excludeOutlier = $('#o-outlier').checked; o.excludeWarn = $('#o-warn').checked;
   }
   function writeOptions() {
     const o = S.opt;
     $('#o-yfrom').value = o.yearFrom ?? ''; $('#o-yto').value = o.yearTo ?? '';
     $('#o-factor').value = Math.round(o.factor * 1000) / 10; $('#o-tol').value = Math.round(o.tolBl * 1000) / 10;
+    $('#o-ok').value = Math.round((o.tolOk ?? 0.05) * 1000) / 10; $('#o-bt').value = Math.round((o.tolBt ?? 0.15) * 1000) / 10;
     $('#o-review').checked = o.excludeReview; $('#o-outlier').checked = o.excludeOutlier; $('#o-warn').checked = o.excludeWarn;
     for (const [id, set] of [['o-type', o.types], ['o-prov', o.provs]]) {
       $$(`#${id} input`).forEach(i => { i.checked = set.has(i.value); });
@@ -106,7 +108,7 @@
       const wb = await XLSXIO.read(await file.arrayBuffer());
       // Nạp lại BOQ (vd sau khi QS đã nhập giá): giữ các lựa chọn nhóm, baseline nhập tay, ý kiến đã có
       if (S.items.length) S.session = sessionData();
-      const prev = new Map(S.sheets.map(s => [s.name, s.det]));
+      const prev = new Map(S.sheets.filter(s => s.include).map(s => [s.name, s.det]));   // giữ cấu trúc QS đã chỉnh
       S.wb = wb; S.fileName = file.name; S.sheets = []; S.items = []; S.lines = [];
       wb.sheets.forEach((sh, si) => {
         if (sh.state !== 'visible' || OWN.test(sh.name)) return;
@@ -270,13 +272,15 @@
     const shown = !!(c && st && (fit.level !== 'none' || c.picked));
     const ref = shown ? { p10: st.p10 * f, p25: st.p25 * f, p50: st.med * f, p75: st.p75 * f, p90: st.p90 * f } : null;
     const qs = it.qs;
+    // Đánh giá: theo vị trí trên phân bố + ngưỡng % so với P50 (tránh gắn cờ khi phân bố quá hẹp)
+    const d50 = ref && isNum(qs) && ref.p50 ? qs / ref.p50 - 1 : null;
     let ev;
     if (it.skip) ev = 'skip';
     else if (!ref) ev = 'notk';
     else if (!isNum(qs)) ev = 'nogia';
-    else if (qs < ref.p10 || qs > ref.p90) ev = 'bt';
-    else if (qs < ref.p25 || qs > ref.p75) ev = 'xem';
-    else ev = 'ok';
+    else if ((qs >= ref.p25 && qs <= ref.p75) || Math.abs(d50) <= o.tolOk) ev = 'ok';
+    else if ((qs < ref.p10 || qs > ref.p90) && Math.abs(d50) > o.tolBt) ev = 'bt';
+    else ev = 'xem';
     const zone = !ref || !isNum(qs) ? '' : qs < ref.p10 ? '< P10' : qs < ref.p25 ? 'P10–P25' : qs <= ref.p75 ? 'P25–P75' : qs <= ref.p90 ? 'P75–P90' : '> P90';
     const prank = ref && isNum(qs) ? DXG.percentRank(st.sorted, qs / f) : null;
     const base = isNum(it.baseManual) ? it.baseManual : isNum(it.baseFile) ? it.baseFile : it.baseCol;
@@ -291,7 +295,7 @@
       if (fit.level === 'thap') notes.push('Khớp nhóm yếu');
       if (c.ratio !== 1) notes.push(`Quy đổi ${IX.groups[c.g].unit} ×${fmtQ(c.ratio)}`);
     }
-    it.c = { cand: c, shown, st, fit, ref, qs, ev, zone, prank, base, baseSrc, dev, devHi, notes,
+    it.c = { cand: c, shown, st, fit, ref, qs, d50, ev, zone, prank, base, baseSrc, dev, devHi, notes,
       amtQs: isNum(qs) && isNum(it.qty) ? qs * it.qty : null, amtRef: ref && isNum(it.qty) ? ref.p50 * it.qty : null,
       amtBase: isNum(base) && isNum(it.qty) ? base * it.qty : null };
     return it.c;
@@ -324,9 +328,9 @@
     const dRef = t.ref ? (t.qsRef - t.ref) / t.ref : null, dBase = t.base ? (t.qsBase - t.base) / t.base : null;
     $('#kpis').innerHTML = [
       ['Dòng hạng mục', NF.format(t.n), `${NF.format(t.tk)} dòng có giá tham khảo · ${NF.format(t.qs)} dòng QS đã có giá`, 'all'],
-      ['Hợp lý', NF.format(t.ev.ok), 'giá QS trong khoảng P25–P75 của CSDL', 'ok'],
-      ['Cần xem', NF.format(t.ev.xem), 'giá QS trong P10–P25 hoặc P75–P90', 'xem'],
-      ['Bất thường', NF.format(t.ev.bt), 'giá QS dưới P10 hoặc trên P90', 'bt'],
+      ['Hợp lý', NF.format(t.ev.ok), `trong P25–P75 hoặc lệch P50 ≤ ${Math.round(S.opt.tolOk * 100)}%`, 'ok'],
+      ['Cần xem', NF.format(t.ev.xem), 'ngoài P25–P75, chưa tới mức bất thường', 'xem'],
+      ['Bất thường', NF.format(t.ev.bt), `ngoài P10–P90 và lệch P50 > ${Math.round(S.opt.tolBt * 100)}%`, 'bt'],
       ['Tổng giá trị QS', fmt(t.amtQs), `so với P50 CSDL: ${dRef === null ? '—' : pct(dRef)} (${NF.format(t.nRef)} dòng)`, ''],
       ['So với baseline', dBase === null ? '—' : pct(dBase), dBase === null ? (S.baseName ? 'chưa ghép được dòng nào' : 'chưa có baseline') : `${NF.format(t.nBase)} dòng · ${NF.format(t.devHi)} dòng lệch > ${Math.round(S.opt.tolBl * 100)}%`, 'dev'],
     ].map(([k, v, s, f]) => `<div class="kpi${f ? ' clickable' : ''}" ${f ? `data-f="${f}"` : ''}><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="s">${esc(s)}</div></div>`).join('');
@@ -364,7 +368,7 @@
       <td class="num"><b>${c.ref ? fmt(c.ref.p50) : ''}</b></td>
       <td class="num small">${c.ref ? `${fmt(c.ref.p25)} – ${fmt(c.ref.p75)}<div class="price-sub">P10–P90: ${fmt(c.ref.p10)} – ${fmt(c.ref.p90)}</div>` : ''}</td>
       <td class="num"><b>${fmt(c.qs)}</b></td>
-      <td class="num small">${esc(c.zone)}${c.prank !== null ? `<div class="price-sub">≈ P${Math.round(c.prank * 100)}</div>` : ''}</td>
+      <td class="num small">${esc(c.zone)}${c.d50 !== null ? `<div class="price-sub">${pct(c.d50)} so P50</div>` : ''}</td>
       <td>${evBadge(l)}</td>
       <td class="num">${fmt(c.base)}${c.baseSrc ? `<div class="price-sub">${esc(c.baseSrc)}</div>` : ''}</td>
       <td class="num ${c.devHi ? 'd-hi' : c.dev ? 'd-ok' : ''}">${c.dev ? pct(c.dev.pct) : ''}</td></tr>`;
@@ -415,7 +419,7 @@
     $('#dw-title').textContent = `${it.sheet} · dòng Excel ${it.r + 1}${it.code ? ' · mã ' + it.code : ''}`;
     const kv = [['Mô tả', esc(it.desc)], ['Hạng mục cha', esc(it.ctx)], ['Đơn vị / KL', `${esc(it.unit)} · ${fmtQ(it.qty)}`],
       ['Giá QS', isNum(c.qs) ? `<b>${fmt(c.qs)}</b>${isNum(it.rate) ? '' : ' <span class="muted small">(= thành tiền / khối lượng)</span>'}` : '<span class="muted">chưa có trong file</span>'],
-      ['Đánh giá', `${evBadge(it)} ${c.zone ? `<span class="small">vị trí ${esc(c.zone)}${c.prank !== null ? ` (≈ P${Math.round(c.prank * 100)})` : ''}</span>` : ''}`],
+      ['Đánh giá', `${evBadge(it)} ${c.zone ? `<span class="small">vị trí ${esc(c.zone)}${c.prank !== null ? ` (≈ P${Math.round(c.prank * 100)})` : ''} · ${pct(c.d50)} so với P50</span>` : ''}`],
       ['Baseline', isNum(c.base) ? `${fmt(c.base)} <span class="muted small">(${esc(c.baseSrc)}${it.baseHow && c.baseSrc === 'file baseline' ? ', ghép theo ' + esc(it.baseHow) : ''})</span>${c.dev ? ` · QS lệch <span class="${c.devHi ? 'd-hi' : 'd-ok'}">${pct(c.dev.pct)}</span>` : ''}` : '—'],
       ['Lưu ý dữ liệu', c.notes.length ? `<span class="warn">${esc(c.notes.join(' · '))}</span>` : '—']];
     let h = `<div class="row-in" style="justify-content:space-between;margin-bottom:10px"><button class="btn sm" data-do="prev">← Dòng trước</button><button class="btn sm" data-do="next">Dòng sau →</button></div>
@@ -502,7 +506,7 @@
     $('#tab-sum').innerHTML = `<div class="sum-grid">
       <div class="card"><h3>Đánh giá giá QS so với CSDL</h3>
         <div class="distbar">${seg(t.ev.ok, 'c-ok', 'Hợp lý')}${seg(t.ev.xem, 'c-lo', 'Cần xem')}${seg(t.ev.bt, 'c-hi', 'Bất thường')}${seg(t.ev.nogia + t.ev.notk, 'c-na', 'Chưa có giá / tham khảo')}</div>
-        <div class="legend"><span><i class="c-ok"></i>Hợp lý (P25–P75): ${t.ev.ok}</span><span><i class="c-lo"></i>Cần xem: ${t.ev.xem}</span><span><i class="c-hi"></i>Bất thường (&lt;P10, &gt;P90): ${t.ev.bt}</span><span><i class="c-na"></i>Chưa có giá QS: ${t.ev.nogia} · không có tham khảo: ${t.ev.notk}</span></div>
+        <div class="legend"><span><i class="c-ok"></i>Hợp lý: ${t.ev.ok}</span><span><i class="c-lo"></i>Cần xem: ${t.ev.xem}</span><span><i class="c-hi"></i>Bất thường: ${t.ev.bt}</span><span><i class="c-na"></i>Chưa có giá QS: ${t.ev.nogia} · không có tham khảo: ${t.ev.notk}</span></div>
         <p class="small muted">Đánh giá chỉ để QS tham khảo. Giá lệch khỏi CSDL có thể đúng do điều kiện riêng của dự án — QS ghi lý do vào ý kiến.</p></div>
       <div class="card"><h3>Dòng nên rà soát (bất thường hoặc lệch baseline &gt; ${Math.round(o.tolBl * 100)}%)</h3>
         <div class="tbl-wrap"><table><thead><tr><th>Mô tả</th><th class="num">Giá QS</th><th class="num">P50</th><th class="num">Vị trí</th><th class="num">QS / BL</th><th class="num">Chênh TT vs P50</th></tr></thead><tbody>
@@ -530,11 +534,11 @@
       bt: wb.dxf({ fill: 'FFF8CBAD', color: 'FF9C0006', bold: true }), dev: wb.dxf({ color: 'FF9C0006', bold: true }),
     };
     wb.putSheet('TK_DanhGia', evalRows(st), {
-      widths: [14, 7, 26, 8, 48, 7, 11, 40, 8, 11, 7, 7, 8, 12, 12, 12, 12, 12, 13, 10, 18, 13, 10, 16, 16, 30, 40],
+      widths: [14, 7, 26, 8, 48, 7, 11, 40, 8, 11, 7, 7, 8, 12, 12, 12, 12, 12, 13, 9, 10, 18, 13, 10, 16, 16, 30, 40],
       freeze: 1, filter: 1,
       cf: [
-        { sqref: `U2:U${S.items.length + 1}`, rules: [{ formula: 'U2="Hợp lý"', dxf: dx.ok }, { formula: 'U2="Cần xem"', dxf: dx.xem }, { formula: 'U2="Bất thường"', dxf: dx.bt }] },
-        { sqref: `W2:W${S.items.length + 1}`, rules: [{ formula: `AND(ISNUMBER(W2),ABS(W2)>${S.opt.tolBl})`, dxf: dx.dev }] },
+        { sqref: `V2:V${S.items.length + 1}`, rules: [{ formula: 'V2="Hợp lý"', dxf: dx.ok }, { formula: 'V2="Cần xem"', dxf: dx.xem }, { formula: 'V2="Bất thường"', dxf: dx.bt }] },
+        { sqref: `X2:X${S.items.length + 1}`, rules: [{ formula: `AND(ISNUMBER(X2),ABS(X2)>${S.opt.tolBl})`, dxf: dx.dev }] },
       ],
     });
     if (opt.sum) wb.putSheet('TK_TongHop', summaryRows(st), { widths: [46, 9, 9, 9, 11, 11, 18, 11, 11] });
@@ -546,7 +550,7 @@
   // Sheet đánh giá: 1 dòng / hạng mục BOQ. Giá QS, KL là công thức trỏ về sheet gốc → tự cập nhật khi QS sửa giá.
   function evalRows(st) {
     const H = ['Sheet', 'Dòng', 'Hạng mục', 'Mã', 'Mô tả', 'ĐV', 'KL', 'Nhóm tham khảo trong CSDL', 'ĐV nhóm', 'Độ phù hợp', 'Số BG', 'Số DA', 'Năm gần nhất',
-      'P10', 'P25', 'P50 (giá TK)', 'P75', 'P90', 'Giá QS', 'Vị trí', 'Đánh giá', 'Baseline', 'QS / Baseline', 'Thành tiền QS', 'Thành tiền theo P50', 'Lưu ý dữ liệu', 'Ý kiến QS / tư vấn'];
+      'P10', 'P25', 'P50 (giá TK)', 'P75', 'P90', 'Giá QS', 'QS / P50', 'Vị trí', 'Đánh giá', 'Baseline', 'QS / Baseline', 'Thành tiền QS', 'Thành tiền theo P50', 'Lưu ý dữ liệu', 'Ý kiến QS / tư vấn'];
     const rows = [H.map(v => ({ v, s: st.head }))];
     S.items.forEach((it, k) => {
       const c = it.c, x = k + 2, cols = it.sh.det.cols, sr = sheetRef(it.sheet), er = it.r + 1;
@@ -557,7 +561,8 @@
         : (cols.amount !== undefined && cols.qty !== undefined ? `IFERROR(IF(${cell(cols.amount)}/${cell(cols.qty)}=0,"",${cell(cols.amount)}/${cell(cols.qty)}),"")` : null);
       const num = v => isNum(v) ? Math.round(v) : null;
       const S_ = `S${x}`, N_ = `N${x}`, O_ = `O${x}`, P_ = `P${x}`, Q_ = `Q${x}`, R_ = `R${x}`;
-      const evalF = it.skip ? null : `IF(${P_}="","${EVAL.notk}",IF(${S_}="","${EVAL.nogia}",IF(OR(${S_}<${N_},${S_}>${R_}),"${EVAL.bt}",IF(OR(${S_}<${O_},${S_}>${Q_}),"${EVAL.xem}","${EVAL.ok}"))))`;
+      const o = S.opt, D = `ABS(${S_}/${P_}-1)`;
+      const evalF = it.skip ? null : `IF(${P_}="","${EVAL.notk}",IF(${S_}="","${EVAL.nogia}",IF(OR(AND(${S_}>=${O_},${S_}<=${Q_}),${D}<=${o.tolOk}),"${EVAL.ok}",IF(AND(OR(${S_}<${N_},${S_}>${R_}),${D}>${o.tolBt}),"${EVAL.bt}","${EVAL.xem}"))))`;
       rows.push([
         { v: it.sheet, s: st.txt },
         { f: `HYPERLINK("#${sr}A${er}",${er})`, v: er, s: st.link },
@@ -568,10 +573,11 @@
         { v: g ? c.st.n : null, s: st.num }, { v: g ? c.st.proj : null, s: st.num }, { v: g ? c.st.latest || null : null, s: st.txt },
         { v: R ? num(R.p10) : null, s: st.ref }, { v: R ? num(R.p25) : null, s: st.ref }, { v: R ? num(R.p50) : null, s: st.ref }, { v: R ? num(R.p75) : null, s: st.ref }, { v: R ? num(R.p90) : null, s: st.ref },
         qsF ? { f: qsF, v: isNum(c.qs) ? c.qs : '', s: st.qs } : { v: null, s: st.qs },
+        { f: `IF(OR(${S_}="",${P_}=""),"",${S_}/${P_}-1)`, v: c.d50 !== null ? c.d50 : '', s: st.pct },
         { f: `IF(OR(${S_}="",${P_}=""),"",IF(${S_}<${N_},"< P10",IF(${S_}<${O_},"P10–P25",IF(${S_}<=${Q_},"P25–P75",IF(${S_}<=${R_},"P75–P90","> P90")))))`, v: c.zone, s: st.txt },
         evalF ? { f: evalF, v: EVAL[c.ev], s: st.txt } : { v: EVAL.skip, s: st.txt },
         { v: isNum(c.base) ? c.base : null, s: st.num },
-        { f: `IF(OR(${S_}="",V${x}=""),"",${S_}/V${x}-1)`, v: c.dev && isNum(c.dev.pct) ? c.dev.pct : '', s: st.pct },
+        { f: `IF(OR(${S_}="",W${x}=""),"",${S_}/W${x}-1)`, v: c.dev && isNum(c.dev.pct) ? c.dev.pct : '', s: st.pct },
         { f: `IF(OR(${S_}="",G${x}=""),"",${S_}*G${x})`, v: isNum(c.amtQs) ? c.amtQs : '', s: st.num },
         { f: `IF(OR(${P_}="",G${x}=""),"",${P_}*G${x})`, v: isNum(c.amtRef) ? c.amtRef : '', s: st.num },
         { v: c.notes.join(' · '), s: st.wrap }, { v: it.note, s: st.wrap },
@@ -587,6 +593,7 @@
       [`Lập lúc ${new Date().toLocaleString('vi-VN', { hour12: false })}${window.SECURE ? ' · ' + window.SECURE.name : ''}`],
       [`CSDL: giá quy về ${window.DB.baseYear || 2026} · hệ số ${Math.round(o.factor * 1000) / 10}% · năm ${o.yearFrom || '…'}–${o.yearTo || '…'} · loại hình: ${[...o.types].join(', ') || 'tất cả'} · tỉnh: ${[...o.provs].join(', ') || 'tất cả'}`],
       [`Baseline: ${S.baseName || (t.base ? 'cột baseline trong BOQ' : 'chưa có')} · ngưỡng lệch ${Math.round(o.tolBl * 100)}%`],
+      [`Đánh giá giá QS: Hợp lý = trong P25–P75 hoặc lệch P50 ≤ ${Math.round(o.tolOk * 100)}% · Bất thường = ngoài P10–P90 và lệch P50 > ${Math.round(o.tolBt * 100)}% · còn lại Cần xem`],
       [{ v: 'Giá do QS lập. CSDL chỉ dùng để tham khảo. Bảng dưới là số liệu tại thời điểm xuất; sheet TK_DanhGia tự cập nhật khi QS sửa giá trong các sheet BOQ.', s: st.note }],
       [],
       [H('Chỉ tiêu'), H('Giá trị')],
@@ -649,7 +656,7 @@
     onFile('#f-boq', loadBoq); onFile('#f-base', loadBase); onFile('#f-sess', loadSession);
     $('#map-tbl').addEventListener('change', onMapChange);
     $('#go').addEventListener('click', runAll);
-    for (const id of ['#o-yfrom', '#o-yto', '#o-factor', '#o-tol', '#o-review', '#o-outlier', '#o-warn']) $(id).addEventListener('change', recompute);
+    for (const id of ['#o-yfrom', '#o-yto', '#o-factor', '#o-tol', '#o-ok', '#o-bt', '#o-review', '#o-outlier', '#o-warn']) $(id).addEventListener('change', recompute);
     $('#flt').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setFilter(b.dataset.f); });
     $('#kpis').addEventListener('click', e => { const k = e.target.closest('.kpi[data-f]'); if (k) { switchTab('lines'); setFilter(k.dataset.f); } });
     let tq; $('#flt-q').addEventListener('input', e => { clearTimeout(tq); tq = setTimeout(() => { S.view.q = e.target.value; S.view.shown = PAGE; renderTable(); }, 200); });

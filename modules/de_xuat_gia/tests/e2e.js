@@ -98,7 +98,7 @@ print(json.dumps([[c for c in r] for r in ws.iter_rows(min_row=2, values_only=Tr
 
   console.log('3. Công thức trong Excel (LibreOffice tính lại)');
   const rows = recalc(f2);
-  const evCol = 20, zoneCol = 19, qsCol = 18;
+  const evCol = 21, zoneCol = 20, qsCol = 18;
   const LABEL = { ok: 'Hợp lý', xem: 'Cần xem', bt: 'Bất thường', nogia: 'Chưa có giá QS', notk: 'Không có tham khảo' };
   check(rows.length === s.length && rows.every((r, k) => r[evCol] === LABEL[s[k].ev]), 'cột Đánh giá do Excel tính khớp với phần mềm');
   // QS sửa giá dòng "Ván khuôn móng" (E10) trong sheet gốc → TK_DanhGia phải đổi đánh giá

@@ -35,9 +35,9 @@ Công cụ **tư vấn cho công tác giá**:
 
 | Đánh giá | Điều kiện |
 |---|---|
-| Hợp lý | giá QS trong P25–P75 |
-| Cần xem | giá QS trong P10–P25 hoặc P75–P90 |
-| Bất thường | giá QS dưới P10 hoặc trên P90 |
+| Hợp lý | giá QS trong P25–P75, **hoặc** lệch P50 không quá 5% |
+| Bất thường | giá QS ngoài P10–P90 **và** lệch P50 quá 15% |
+| Cần xem | các trường hợp còn lại |
 | Chưa có giá QS / Không có tham khảo | thiếu một trong hai |
 | QS / Baseline | tô đỏ khi lệch vượt ngưỡng (mặc định 10%) |
 
@@ -82,6 +82,18 @@ modules/de_xuat_gia/
 ```
 
 Dựng: `python build.py` (app tra cứu + module) hoặc `python build.py --module` (chỉ module). Kết quả nằm ở `docs/de-xuat-gia/`.
+
+## Chạy thử với dữ liệu giả lập
+
+```
+node modules/de_xuat_gia/demo/chay_thu.js          # chạy trọn quy trình, kết quả ở modules/de_xuat_gia/demo/ket_qua/
+node modules/de_xuat_gia/demo/chay_thu.js --mo     # mở trang chạy thử (http://127.0.0.1:8765) để tự thao tác
+```
+
+Dữ liệu chạy thử gồm CSDL giả lập (khoảng 500 báo giá, 40 nhóm công việc, 12 dự án, năm 2020–2026) và BOQ nhà xưởng 36 dòng có định dạng như BOQ thật. Kết quả gồm:
+- 2 file Excel đã thêm sheet `TK_*`;
+- ảnh giao diện;
+- `KET_QUA.md`: tóm tắt, chi tiết từng dòng, kết quả kiểm tra format và công thức.
 
 ## Kiểm thử
 

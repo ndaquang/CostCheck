@@ -84,7 +84,9 @@
       <div class="opt"><label for="o-factor">Hệ số điều chỉnh giá CSDL</label><input id="o-factor" type="number" step="0.5" value="100"><span class="unit">%</span></div>
       <div class="opt"><label for="o-tol">Ngưỡng lệch baseline</label><input id="o-tol" type="number" value="10" step="1"><span class="unit">%</span></div>
       <div class="opt chk"><label><input type="checkbox" id="o-review" checked> Bỏ dòng REVIEW</label><label><input type="checkbox" id="o-outlier" checked> Bỏ giá ngoại lai</label><label><input type="checkbox" id="o-warn"> Bỏ dòng có cảnh báo</label></div>
-      <div class="opt rule small muted">Đánh giá giá QS: <b>Hợp lý</b> trong P25–P75 · <b>Cần xem</b> P10–P25 / P75–P90 · <b>Bất thường</b> dưới P10 / trên P90</div>
+      <div class="opt"><label for="o-ok">Hợp lý khi lệch P50 ≤</label><input id="o-ok" type="number" value="5" step="1"><span class="unit">%</span></div>
+      <div class="opt"><label for="o-bt">Bất thường khi lệch P50 &gt;</label><input id="o-bt" type="number" value="15" step="1"><span class="unit">%</span></div>
+      <div class="opt rule small muted">Đánh giá giá QS: <b>Hợp lý</b> khi trong P25–P75 hoặc lệch P50 không quá ngưỡng · <b>Bất thường</b> khi ngoài P10–P90 <i>và</i> lệch P50 vượt ngưỡng · còn lại <b>Cần xem</b>.</div>
     </div>
 
     <div class="kpis" id="kpis"></div>

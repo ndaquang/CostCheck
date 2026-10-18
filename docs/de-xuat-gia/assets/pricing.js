@@ -327,7 +327,7 @@
     if (!n) return 0;
     let best = 0;
     for (const k of COLS[key]) {
-      if (n === k) best = Math.max(best, 3);
+      if (n === k || n.startsWith(k + ' ')) best = Math.max(best, 3);   // "STT / Item": từ đầu tiên là tên cột
       else if ((' ' + n + ' ').includes(' ' + k + ' ')) best = Math.max(best, k.length >= 4 ? 2 : 1);
     }
     return best;
