@@ -1,11 +1,11 @@
 'use strict';
-/* Kiểm thử đầu-cuối trên Chromium (dữ liệu giả lập):
-   1. BOQ chưa có giá → tra giá tham khảo, QS chọn nhóm + ghi ý kiến → xuất → BOQ gốc giữ nguyên từng byte.
-   2. Nạp lại BOQ đã có giá QS → lựa chọn/ý kiến được giữ, đánh giá Hợp lý/Cần xem/Bất thường → baseline → xuất.
-   3. LibreOffice tính lại: kết quả công thức trong TK_DanhGia khớp với phần mềm; sửa giá QS trong sheet gốc
-      thì đánh giá tự đổi.
-   4. Lưu phiên → khôi phục trên trang mới.
-   Dùng: node tests/e2e.js <thư mục làm việc tạm>   (cần playwright, python3 + openpyxl, LibreOffice) */
+/* Kiểm thử đầu-cuối trên Chromium (dữ liệu giả lập) — quy trình ĐIỀN GIÁ TRỰC TIẾP vào BOQ:
+   1. BOQ chưa có giá → tính giá điền (P25) → điền vào ô Đơn giá → file chỉ khác gốc ở các ô được điền.
+   2. LibreOffice tính lại: Thành tiền = KL × đơn giá vừa điền, Tổng cộng cập nhật.
+   3. BOQ đã có một phần giá QS → ô có giá được giữ, chỉ ô trống được điền.
+   4. Đơn giá bổ sung → dòng trước đó không có tham khảo được điền theo giá bổ sung.
+   5. Giá điền tay + lưu / khôi phục phiên.
+   Dùng: node tests/e2e.js <thư mục tạm>   (cần playwright, python3 + openpyxl, LibreOffice) */
 const fs = require('fs'), path = require('path'), http = require('http');
 const { execFileSync } = require('child_process');
 let pw; try { pw = require('playwright'); } catch { pw = require(path.join(execFileSync('npm', ['root', '-g']).toString().trim(), 'playwright')); }
@@ -14,12 +14,12 @@ const MOD = path.resolve(__dirname, '..');
 const WORK = path.resolve(process.argv[2] || fs.mkdtempSync('/tmp/dxg-'));
 const SITE = path.join(WORK, 'site');
 fs.rmSync(SITE, { recursive: true, force: true });
-fs.cpSync(MOD, SITE, { recursive: true, filter: s => !s.includes(`${path.sep}tests`) });
+fs.cpSync(MOD, SITE, { recursive: true, filter: s => !s.includes(`${path.sep}tests`) && !s.includes(`${path.sep}demo`) });
 fs.mkdirSync(path.join(SITE, 'data'), { recursive: true });
 fs.writeFileSync(path.join(SITE, 'data', 'db.js'), 'window.DB = ' + JSON.stringify(require('./fixture_db.js').makeDB()) + ';');
 execFileSync('python3', [path.join(__dirname, 'make_boq.py'), WORK]);
 const py = (code, ...args) => execFileSync('python3', ['-c', code, ...args]).toString().trim();
-const verify = (src, out) => console.log('  ' + execFileSync('python3', [path.join(__dirname, 'verify_format.py'), src, out]).toString().trim());
+const verify = (src, out) => { try { const r = execFileSync('python3', [path.join(__dirname, 'verify_fill.py'), src, out]).toString().trim(); console.log('  ✓ ' + r); } catch (e) { console.log('  ✗ ' + e.stdout); fails++; } };
 let fails = 0; const check = (ok, text) => { console.log(`  ${ok ? '✓' : '✗'} ${text}`); if (!ok) fails++; };
 
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
@@ -28,106 +28,92 @@ const srv = http.createServer((req, res) => {
   if (!p.startsWith(SITE) || !fs.existsSync(p)) { res.writeHead(404); return res.end(); }
   res.writeHead(200, { 'content-type': TYPES[path.extname(p)] || 'application/octet-stream' }); fs.createReadStream(p).pipe(res);
 }).listen(0);
-
-// Tính lại bằng LibreOffice rồi đọc giá trị sheet TK_DanhGia
+const cellsOf = (file, sheet, col) => JSON.parse(py(`import json,sys
+from openpyxl import load_workbook
+ws = load_workbook(sys.argv[1])[sys.argv[2]]
+print(json.dumps({r: ws.cell(r, int(sys.argv[3])).value for r in range(1, ws.max_row + 1)}, default=str))`, file, sheet, String(col)));
 function recalc(file) {
   const dir = path.join(WORK, 'lo'); fs.rmSync(dir, { recursive: true, force: true });
   execFileSync('soffice', ['--headless', '--calc', '--convert-to', 'xlsx', '--outdir', dir, file], { stdio: 'ignore' });
-  return JSON.parse(py(`import json,sys
-from openpyxl import load_workbook
-ws = load_workbook(sys.argv[1], data_only=True)['TK_DanhGia']
-print(json.dumps([[c for c in r] for r in ws.iter_rows(min_row=2, values_only=True)], default=str))`, path.join(dir, path.basename(file))));
+  return path.join(dir, path.basename(file));
 }
 
 (async () => {
   const browser = await pw.chromium.launch();
   const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 1400, height: 900 } });
   const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
-  const exportFile = async (name, sum = true) => {
-    await page.click('#dx-export');
-    if (!(await page.isChecked('#x-sum')) === sum) await page.click('#x-sum');
-    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#dlg-form button[type=submit]')]);
+  const state = () => page.evaluate(() => window.__DXG_STATE.items.map(it => ({ id: it.id, r: it.r, sheet: it.sheet, desc: it.desc, fill: it.c.fill, price: it.c.price, why: it.c.why, p25: it.c.ref && it.c.ref.p25, qs: it.qs })));
+  const run = async file => {
+    await page.setInputFiles('#f-boq', file); await page.waitForSelector('#step-map:not([hidden])');
+    await page.click('#go'); await page.waitForSelector('#step-res:not([hidden])');
+  };
+  const exportFile = async name => {
+    const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#dx-export')]);
     const f = path.join(WORK, name); await dl.saveAs(f); return f;
   };
-  const state = () => page.evaluate(() => window.__DXG_STATE.items.map(it => ({ id: it.id, desc: it.desc, qs: it.c.qs, ev: it.c.ev, zone: it.c.zone, p50: it.c.ref && it.c.ref.p50, base: it.c.base, note: it.note, picked: !!(it.cands[it.sel] && it.cands[it.sel].picked) })));
-
   await page.goto(`http://127.0.0.1:${srv.address().port}/index.html`);
   await page.waitForSelector('#splash', { state: 'detached' });
 
-  console.log('1. BOQ chưa có giá');
-  await page.setInputFiles('#f-boq', path.join(WORK, 'BOQ_mau.xlsx'));
-  await page.waitForSelector('#step-map:not([hidden])');
-  await page.click('#go'); await page.waitForSelector('#step-res:not([hidden])');
+  console.log('1. BOQ chưa có giá → điền giá');
+  await run(path.join(WORK, 'BOQ_mau.xlsx'));
   let s = await state();
-  check(s.every(x => ['nogia', 'notk'].includes(x.ev)), 'chưa có giá QS → không dòng nào bị chấm hợp lý/bất thường ' + JSON.stringify(s.filter(x => !['nogia', 'notk'].includes(x.ev))));
-  check(s.filter(x => x.p50).length >= 11, `có giá tham khảo cho ${s.filter(x => x.p50).length}/${s.length} dòng`);
-  // QS: dòng VRV không khớp → tìm nhóm thủ công; ghi ý kiến
-  await page.click('#res-tbl tr[data-id="Xay dung|15"]'); await page.waitForSelector('#drawer:not([hidden])');
-  await page.fill('#dw-q', 'van chuyen phe thai'); await page.click('[data-do=search]');
-  await page.click('#dw-sr .cand[data-g]');
-  await page.fill('#dw-note', 'Thiết bị MEP: lấy báo giá NCC, CSDL không có'); await page.click('[data-do=apply]');
-  await page.click('[data-do=prev]');
+  const by = id => s.find(x => x.id === id);
+  check(s.filter(x => x.fill).length >= 10, `${s.filter(x => x.fill).length}/${s.length} dòng sẽ được điền`);
+  check(s.filter(x => x.fill).every(x => Math.abs(x.price - x.p25) / x.p25 < 0.01), 'giá điền = P25 (đã làm tròn)');
+  check(!by('Xay dung|15').fill, 'dòng không có tham khảo (VRV) không bị điền: ' + by('Xay dung|15').why);
+  await page.screenshot({ path: path.join(WORK, 'lines.png'), fullPage: true });
+  const f1 = await exportFile('lan1_DaDienGia.xlsx');
+  verify(path.join(WORK, 'BOQ_mau.xlsx'), f1);
+  const sheets = py(`from openpyxl import load_workbook as L;import sys;print(L(sys.argv[1]).sheetnames)`, f1);
+  check(sheets === "['Xay dung', 'Hoan thien']", 'không thêm sheet nào: ' + sheets);
+  const E = cellsOf(f1, 'Xay dung', 5);
+  check(s.filter(x => x.sheet === 'Xay dung' && x.fill).every(x => E[x.r + 1] === x.price), 'giá trong ô Excel đúng bằng giá phần mềm tính');
+
+  console.log('2. Công thức Thành tiền tính lại (LibreOffice)');
+  const r1 = recalc(f1);
+  const vals = JSON.parse(py(`import json,sys
+from openpyxl import load_workbook
+ws = load_workbook(sys.argv[1], data_only=True)['Xay dung']
+print(json.dumps([[ws.cell(r,4).value, ws.cell(r,5).value, ws.cell(r,7).value] for r in range(6, 18)]))`, r1));
+  check(vals.filter(v => typeof v[1] === 'number').every(v => Math.abs(v[2] - v[0] * v[1]) < 1), 'Thành tiền = KL × đơn giá đã điền');
+  const total = vals[vals.length - 1][2], sumRows = vals.slice(0, -1).reduce((t, v) => t + (typeof v[2] === 'number' ? v[2] : 0), 0);
+  check(Math.abs(total - sumRows) < 1 && total > 0, `Tổng cộng cập nhật: ${Math.round(total).toLocaleString('vi-VN')}`);
+
+  console.log('3. BOQ đã có một phần giá QS');
+  await run(path.join(WORK, 'BOQ_QS.xlsx'));
+  s = await state();
+  check(s.filter(x => x.qs).every(x => !x.fill && x.price === x.qs), `${s.filter(x => x.qs).length} ô đã có giá được giữ nguyên`);
+  check(by('Xay dung|13').fill, 'ô trống (Sơn tường trong nhà) được điền');
+  const f2 = await exportFile('lan2_DaDienGia.xlsx');
+  verify(path.join(WORK, 'BOQ_QS.xlsx'), f2);
+
+  console.log('4. Đơn giá bổ sung');
+  await run(path.join(WORK, 'BOQ_mau.xlsx'));
+  await page.setInputFiles('#f-extra', path.join(WORK, 'DonGia_BoSung.xlsx'));
+  await page.waitForFunction(() => window.__DXG_STATE.extra.length > 0);
+  await page.waitForFunction(() => window.__DXG_STATE.items.find(it => it.id === 'Xay dung|15').c.fill);
+  s = await state();
+  check(by('Xay dung|15').price === 320000000, 'VRV được điền theo đơn giá bổ sung: ' + by('Xay dung|15').price);
+  check(by('Xay dung|13').price === 61000, 'đơn giá bổ sung được ưu tiên hơn CSDL cũ (Sơn tường): ' + by('Xay dung|13').price);
+
+  console.log('5. Giá tay + lưu / khôi phục phiên');
+  await page.click('#res-tbl tr[data-id="Xay dung|12"]'); await page.waitForSelector('#drawer:not([hidden])');
+  await page.fill('#dw-manual', '97000'); await page.click('[data-do=apply]');
   await page.screenshot({ path: path.join(WORK, 'drawer.png') });
   await page.click('#dw-close');
-  const f1 = await exportFile('lan1_ThamKhaoGia.xlsx');
-  verify(path.join(WORK, 'BOQ_mau.xlsx'), f1);
-
-  console.log('2. Nạp lại BOQ đã có giá QS');
-  await page.setInputFiles('#f-boq', path.join(WORK, 'BOQ_QS.xlsx'));
-  await page.waitForSelector('#step-map:not([hidden])');
-  await page.click('#go'); await page.waitForSelector('#step-res:not([hidden])');
-  await page.setInputFiles('#f-base', path.join(WORK, 'Baseline_mau.xlsx'));
-  await page.waitForFunction(() => window.__DXG_STATE.items.some(it => it.baseFile));
-  s = await state();
-  for (const r of s) console.log(`    ${r.id.padEnd(14)} ${r.desc.slice(0, 36).padEnd(36)} QS ${String(r.qs ?? '').padStart(10)} P50 ${String(Math.round(r.p50 || 0)).padStart(9)} ${String(r.zone).padEnd(8)} ${r.ev}`);
-  const by = id => s.find(x => x.id === id);
-  check(by('Xay dung|15').note.startsWith('Thiết bị MEP') && by('Xay dung|15').picked, 'ý kiến và nhóm QS chọn được giữ khi nạp lại BOQ');
-  check(by('Xay dung|6').ev === 'bt' && by('Xay dung|9').ev === 'bt', 'giá quá cao / quá thấp → Bất thường');
-  check(by('Xay dung|7').ev === 'ok', 'giá trong P25–P75 → Hợp lý');
-  check(by('Xay dung|13').ev === 'nogia', 'dòng QS chưa nhập giá → Chưa có giá QS');
-  check(by('Hoan thien|1').base === 300000, 'baseline đọc từ cột trong BOQ');
-  await page.click('.tab[data-tab=sum]'); await page.waitForSelector('#tab-sum .sum-grid');
-  await page.screenshot({ path: path.join(WORK, 'sum.png'), fullPage: true });
-  await page.click('.tab[data-tab=lines]');
-  await page.screenshot({ path: path.join(WORK, 'lines.png'), fullPage: true });
-  const f2 = await exportFile('lan2_ThamKhaoGia.xlsx');
-  verify(path.join(WORK, 'BOQ_QS.xlsx'), f2);
-  // Xuất lần nữa từ file đã có sheet TK_*: sheet TK được thay, không nhân đôi
-  const f3 = await exportFile('lan3_ThamKhaoGia.xlsx');
-  check(py(`from openpyxl import load_workbook as L;import sys;print(L(sys.argv[1]).sheetnames)`, f3) === "['Xay dung', 'Hoan thien', 'TK_DanhGia', 'TK_TongHop', 'TK_NguonGia']", 'xuất lại không nhân đôi sheet TK_*');
-
-  console.log('3. Công thức trong Excel (LibreOffice tính lại)');
-  const rows = recalc(f2);
-  const evCol = 21, zoneCol = 20, qsCol = 18;
-  const LABEL = { ok: 'Hợp lý', xem: 'Cần xem', bt: 'Bất thường', nogia: 'Chưa có giá QS', notk: 'Không có tham khảo' };
-  check(rows.length === s.length && rows.every((r, k) => r[evCol] === LABEL[s[k].ev]), 'cột Đánh giá do Excel tính khớp với phần mềm');
-  // QS sửa giá dòng "Ván khuôn móng" (E10) trong sheet gốc → TK_DanhGia phải đổi đánh giá
-  const edited = path.join(WORK, 'qs_sua_gia.xlsx');
-  py(`import zipfile,sys,re
-src,dst=sys.argv[1],sys.argv[2]
-zi=zipfile.ZipFile(src); zo=zipfile.ZipFile(dst,'w',zipfile.ZIP_DEFLATED)
-for n in zi.namelist():
-    d=zi.read(n)
-    if n=='xl/worksheets/sheet1.xml': d=re.sub(rb'(<c r="E10"[^>]*>)<v>[^<]*</v>', rb'\\g<1><v>183000</v>', d)
-    # Excel tự tính lại ô phụ thuộc khi QS sửa giá; LibreOffice mở file thì dùng giá trị đệm,
-    # nên bỏ giá trị đệm của công thức trong các sheet TK_* để buộc tính lại
-    elif n.startswith('xl/worksheets/') and n not in ('xl/worksheets/sheet1.xml','xl/worksheets/sheet2.xml'): d=re.sub(rb'(</f>)<v>[^<]*</v>', rb'\\1', d)
-    zo.writestr(n,d)
-zo.close()`, f2, edited);
-  const rows2 = recalc(edited);
-  const k10 = s.findIndex(x => x.id === 'Xay dung|9');
-  check(rows[k10][evCol] === 'Bất thường' && rows2[k10][qsCol] === 183000 && rows2[k10][evCol] === 'Hợp lý', `QS sửa giá trong sheet gốc → TK_DanhGia tự đổi: ${rows[k10][evCol]} → ${rows2[k10][evCol]} (${rows2[k10][zoneCol]})`);
-
-  console.log('4. Lưu & khôi phục phiên');
+  check((await state()).find(x => x.id === 'Xay dung|12').price === 97000, 'giá tay được dùng');
   const [ds] = await Promise.all([page.waitForEvent('download'), page.click('#save-sess')]);
   const sess = path.join(WORK, ds.suggestedFilename()); await ds.saveAs(sess);
   await page.reload(); await page.waitForSelector('#splash', { state: 'detached' });
-  await page.setInputFiles('#f-boq', path.join(WORK, 'BOQ_QS.xlsx')); await page.waitForSelector('#step-map:not([hidden])');
-  await page.click('#go'); await page.waitForSelector('#step-res:not([hidden])');
+  await run(path.join(WORK, 'BOQ_mau.xlsx'));
   await page.setInputFiles('#f-sess', sess);
-  await page.waitForFunction(() => window.__DXG_STATE.items.some(it => it.note));
+  await page.waitForFunction(() => window.__DXG_STATE.items.some(it => it.manual === 97000));
   s = await state();
-  check(by('Xay dung|15') && s.find(x => x.id === 'Xay dung|15').note.startsWith('Thiết bị MEP') && s.filter(x => x.base).length >= 8, 'khôi phục ý kiến, nhóm đã chọn và baseline');
+  check(by('Xay dung|12').price === 97000 && by('Xay dung|15').price === 320000000, 'khôi phục giá tay và đơn giá bổ sung');
+  await page.click('.tab[data-tab=sum]'); await page.waitForSelector('#tab-sum .sum-grid');
+  await page.screenshot({ path: path.join(WORK, 'sum.png'), fullPage: true });
+  const f3 = await exportFile('lan3_DaDienGia.xlsx');
+  verify(path.join(WORK, 'BOQ_mau.xlsx'), f3);
 
   if (errs.length) { console.error('LỖI TRANG:', errs); fails++; }
   await browser.close(); srv.close();

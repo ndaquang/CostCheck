@@ -455,6 +455,84 @@
       const pa = parseRef(a) || { r: 0, c: 0 }, pb = parseRef(b || a) || pa;
       d.setAttribute('ref', `${ref(Math.min(pa.r, 0), Math.min(pa.c, 0))}:${ref(Math.max(pb.r, sh.maxR), Math.max(pb.c, sh.maxC))}`);
     }
+    /* --- Điền giá trực tiếp vào BOQ: sửa CHUỖI XML tại đúng ô, không phân tích lại / ghi lại cả sheet ---
+       cells: [{ r, c, v, f? }] (r, c tính từ 0; f = công thức không có dấu "=", v = giá trị đệm).
+       Chỉ ghi vào ô trống (hoặc ô số khi overwrite); không bao giờ đụng ô
+       công thức hay ô chữ. Giữ nguyên style (s), mọi thuộc tính và mọi byte khác của sheet.
+       -> { written: [ref], skipped: [{ ref, why }] } */
+    fillValues(si, cells, o = {}) {
+      const sh = this.sheets[si];
+      let x = dec.decode(this.files.get(sh.path));
+      const written = [], skipped = [];
+      for (const { r, c, v, f } of cells) {
+        const R = ref(r, c);
+        const sd0 = x.indexOf('<sheetData'), sd1 = x.lastIndexOf('</sheetData');
+        const zone = sd0 >= 0 ? [sd0, sd1 < 0 ? x.length : sd1] : [0, x.length];
+        const val = String(v);
+        const body = vt => (f ? `<${vt.replace(/v$/, 'f')}>${xesc(f)}</${vt.replace(/v$/, 'f')}>` : '') + `<${vt}>${val}</${vt}>`;
+        const reCell = new RegExp(`<((?:\\w+:)?c)\\b([^>]*?\\sr="${R}"[^>]*?)(/?)>`, 'g');
+        reCell.lastIndex = zone[0];
+        const m = reCell.exec(x);
+        if (m && m.index < zone[1]) {
+          const tag = m[1], attrs = m[2], selfClose = m[3] === '/', start = m.index, openEnd = start + m[0].length;
+          const tAttr = (/\st="([^"]*)"/.exec(attrs) || [])[1];
+          const cleanAttrs = attrs.replace(/\st="[^"]*"/, '');   // ô trống có thể mang t= thừa
+          if (selfClose) {
+            x = x.slice(0, start) + `<${tag}${cleanAttrs}>${body(tag.replace(/c$/, 'v'))}</${tag}>` + x.slice(openEnd);
+            written.push(R); continue;
+          }
+          const close = x.indexOf(`</${tag}>`, openEnd);
+          const inner = x.slice(openEnd, close);
+          if (/<(\w+:)?f[\s>/]/.test(inner)) { skipped.push({ ref: R, why: 'công thức' }); continue; }
+          const hasV = /<(\w+:)?(v|is)[\s>]/.test(inner) && !/<(\w+:)?v\s*\/>|<(\w+:)?v><\/(\w+:)?v>/.test(inner);
+          if (hasV && (tAttr === 's' || tAttr === 'str' || tAttr === 'inlineStr' || tAttr === 'b' || tAttr === 'e')) { skipped.push({ ref: R, why: 'ô chữ' }); continue; }
+          if (hasV && !o.overwrite) { skipped.push({ ref: R, why: 'đã có giá' }); continue; }
+          const vt = tag.replace(/c$/, 'v');
+          x = x.slice(0, start) + `<${tag}${cleanAttrs}>${body(vt)}</${tag}>` + x.slice(close + tag.length + 3);
+          written.push(R); continue;
+        }
+        // Ô chưa có trong file: chèn vào dòng tương ứng, đúng thứ tự cột
+        const reRow = new RegExp(`<((?:\\w+:)?row)\\b([^>]*?\\sr="${r + 1}"[^>]*?)(/?)>`, 'g');
+        reRow.lastIndex = zone[0];
+        const rm = reRow.exec(x);
+        if (!rm || rm.index >= zone[1]) { skipped.push({ ref: R, why: 'không có dòng' }); continue; }
+        const rowTag = rm[1], cTag = rowTag.replace(/row$/, 'c'), vTag = rowTag.replace(/row$/, 'v');
+        const cellXml = `<${cTag} r="${R}">${body(vTag)}</${cTag}>`;
+        if (rm[3] === '/') { x = x.slice(0, rm.index) + `<${rowTag}${rm[2]}>${cellXml}</${rowTag}>` + x.slice(rm.index + rm[0].length); written.push(R); continue; }
+        const rowOpenEnd = rm.index + rm[0].length, rowClose = x.indexOf(`</${rowTag}>`, rowOpenEnd);
+        const content = x.slice(rowOpenEnd, rowClose);
+        let ins = content.length;
+        const reC = new RegExp(`<(?:\\w+:)?c\\b[^>]*?\\sr="([A-Z]+)\\d+"`, 'g');
+        let cm; while ((cm = reC.exec(content))) { if (colIndex(cm[1]) > c) { ins = cm.index; break; } }
+        x = x.slice(0, rowOpenEnd + ins) + cellXml + x.slice(rowOpenEnd + ins);
+        written.push(R);
+      }
+      if (written.length) { this.files.set(sh.path, enc.encode(x)); this.docs.delete(sh.path); }
+      return { written, skipped };
+    }
+    // Các ô có công thức trong sheet (để biết trước ô nào không được điền)
+    formulaCells(si) {
+      const doc = this.xml(this.sheets[si].path), out = new Set();
+      for (const f of doc.getElementsByTagNameNS(NS, 'f')) { const c = f.parentNode; if (c && c.getAttribute) out.add(c.getAttribute('r')); }
+      return out;
+    }
+    // Buộc Excel tính lại khi mở (để Thành tiền / Tổng cộng cập nhật theo giá vừa điền) — chỉ sửa 1 thuộc tính
+    setFullCalcOnLoad() {
+      const path = 'xl/workbook.xml';
+      let x = dec.decode(this.files.get(path));
+      const m = /<((?:\w+:)?)calcPr\b([^>]*?)(\/?)>/.exec(x);
+      if (m) {
+        let attrs = m[2];
+        attrs = /\sfullCalcOnLoad="/.test(attrs) ? attrs.replace(/\sfullCalcOnLoad="[^"]*"/, ' fullCalcOnLoad="1"') : attrs + ' fullCalcOnLoad="1"';
+        x = x.slice(0, m.index) + `<${m[1]}calcPr${attrs}${m[3]}>` + x.slice(m.index + m[0].length);
+      } else {
+        const pre = (/<(\w+:)?workbook\b/.exec(x) || [])[1] || '';
+        const anchor = x.indexOf(`</${pre}definedNames>`) >= 0 ? `</${pre}definedNames>` : `</${pre}sheets>`;
+        const k = x.indexOf(anchor) + anchor.length;
+        x = x.slice(0, k) + `<${pre}calcPr fullCalcOnLoad="1"/>` + x.slice(k);
+      }
+      this.files.set(path, enc.encode(x)); this.docs.delete(path);
+    }
     async save() {
       for (const sh of this.sheets) if (this.dirty.has(sh.path)) this._fixDimension(sh);
       for (const p of this.dirty) {

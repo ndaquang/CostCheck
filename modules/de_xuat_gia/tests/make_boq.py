@@ -70,3 +70,10 @@ for code, desc, unit, price in [(1, 'Đào đất hố móng bằng máy đào',
     bs.append([code, desc, unit, price])
 bw.save(os.path.join(out, 'Baseline_mau.xlsx'))
 print('ok')
+
+# Đơn giá bổ sung (vd báo giá NCC mới) — có hạng mục không có trong CSDL
+xw = Workbook(); xs = xw.active; xs.title = 'Bao gia NCC'
+xs.append(['STT', 'Mô tả', 'Đơn vị', 'Đơn giá'])
+xs.append([1, 'Hệ thống điều hòa VRV', 'bộ', 320000000])
+xs.append([2, 'Sơn tường trong nhà 1 lớp lót 2 lớp phủ', 'm2', 61000])
+xw.save(os.path.join(out, 'DonGia_BoSung.xlsx'))

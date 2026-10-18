@@ -55,8 +55,7 @@ async function run(browser, site, user, label) {
   await page.click('#res-tbl tr[data-id="Xay dung|5"]');
   const hasProj = await page.$$eval('#dw-body table.refs th', ths => ths.some(t => t.textContent === 'Dự án'));
   await page.click('#dw-close');
-  await page.click('#dx-export');
-  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#dlg-form button[type=submit]')]);
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#dx-export')]);
   const out = path.join(WORK, `${label}_${dl.suggestedFilename()}`); await dl.saveAs(out);
   const sheets = execFileSync('python3', ['-c', `from openpyxl import load_workbook as L;print(L(${JSON.stringify(out)}).sheetnames)`]).toString().trim();
   console.log(`[${label}] ${who.trim()} · cột Dự án trong tham chiếu: ${hasProj} · sheets: ${sheets}`);
@@ -80,8 +79,9 @@ async function run(browser, site, user, label) {
   const browser = await pw.chromium.launch();
   const a = await run(browser, path.join(ROOT, 'docs'), 'admin', 'admin');
   const b = await run(browser, nvMo, 'admin', 'nv-mo');   // bản nhân viên: tài khoản admin cũng chỉ có quyền nhân viên
-  if (!a.hasProj || !a.sheets.includes('TK_NguonGia')) { console.error('admin phải thấy dự án + sheet tham chiếu'); process.exitCode = 1; }
-  if (b.hasProj || b.sheets.includes('TK_NguonGia')) { console.error('nhân viên không được thấy dự án / sheet tham chiếu'); process.exitCode = 1; }
+  if (!a.hasProj) { console.error('admin phải thấy tên dự án trong báo giá tham khảo'); process.exitCode = 1; }
+  if (b.hasProj) { console.error('nhân viên không được thấy tên dự án'); process.exitCode = 1; }
+  for (const x of [a, b]) if (x.sheets !== "['Xay dung', 'Hoan thien']") { console.error('file điền giá không được thêm sheet: ' + x.sheets); process.exitCode = 1; }
   // tài khoản nhân viên mở bản admin: bị chặn
   {
     const srv = serve(path.join(ROOT, 'docs')), page = await browser.newPage();

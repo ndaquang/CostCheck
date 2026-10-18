@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="cho-nhan-vien" content="0">
-<title>Tham khảo giá BOQ</title>
-<link rel="stylesheet" href="assets/dxg.css?v=2">
+<title>Điền giá BOQ</title>
+<link rel="stylesheet" href="assets/dxg.css?v=3">
 <meta name="robots" content="noindex,nofollow">
 <meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
@@ -26,40 +26,46 @@
   <div class="brand">
     <div class="logo">ĐG</div>
     <div>
-      <div class="title">Tham khảo &amp; đánh giá giá BOQ</div>
+      <div class="title">Điền giá BOQ</div>
       <div class="sub" id="db-meta"></div>
     </div>
   </div>
   <div class="spacer"></div>
   <nav class="topnav">
     <a href="../index.html">Tra cứu đơn giá</a>
-    <a href="#" class="on">Tham khảo giá BOQ</a>
+    <a href="#" class="on">Điền giá BOQ</a>
   </nav>
 </header>
 
 <main class="wrap">
-  <p class="intro">Công cụ tư vấn cho QS. <b>QS lập toàn bộ giá trong Excel</b>, CSDL đơn giá chỉ là nguồn tham khảo. Phần mềm tra giá tham khảo cho từng dòng, đánh giá giá QS đã lập và so sánh với baseline. Các sheet BOQ gốc được giữ nguyên, không đổi ô hay định dạng nào. Kết quả nằm ở các sheet mới <code>TK_*</code>.</p>
+  <p class="intro">Lấy <b>giá tốt nhất</b> từ CSDL đơn giá và <b>điền thẳng vào cột Đơn giá của file BOQ</b>. Phần mềm không thêm sheet hay cột nào, chỉ ghi số vào các ô đơn giá đang trống; định dạng ô, công thức Thành tiền và mọi thứ khác giữ nguyên. Dòng khớp chưa đủ tin cậy được để trống cho QS định giá. Nạp thêm đơn giá bổ sung để kết quả chính xác hơn.</p>
 
   <!-- Bước 1: nạp file -->
   <section class="card" id="step-load">
     <h2><span class="step">1</span> Nạp file</h2>
-    <div class="drops">
+    <div class="drops drops-4">
       <label class="drop" id="drop-boq">
         <input type="file" id="f-boq" accept=".xlsx,.xlsm">
-        <b>File BOQ</b>
-        <span class="muted small">Chưa có giá: lấy giá tham khảo trước khi lập giá. Đã có giá QS: đánh giá giá. Sau khi sửa giá trong Excel, nạp lại file này, các lựa chọn và ý kiến đã có được giữ nguyên.</span>
+        <b>File BOQ cần điền giá</b>
+        <span class="muted small">Kéo thả hoặc bấm để chọn (.xlsx, .xlsm). Ô đơn giá đã có giá được giữ nguyên.</span>
         <span class="fname" id="n-boq"></span>
+      </label>
+      <label class="drop" id="drop-extra">
+        <input type="file" id="f-extra" accept=".xlsx,.xlsm">
+        <b>Đơn giá bổ sung <span class="muted">(không bắt buộc)</span></b>
+        <span class="muted small">Báo giá NCC, BOQ đã có giá, bảng giá mới… có cột Mô tả, Đơn vị, Đơn giá. Được thêm vào CSDL của phiên và ưu tiên khi khớp. Nạp nhiều file được.</span>
+        <span class="fname" id="n-extra"></span>
       </label>
       <label class="drop" id="drop-base">
         <input type="file" id="f-base" accept=".xlsx,.xlsm">
-        <b>Giá baseline <span class="muted">(không bắt buộc, nạp lúc nào cũng được)</span></b>
-        <span class="muted small">File Excel có Mã/STT, Mô tả, Đơn vị và cột giá baseline. Hoặc chọn cột baseline ngay trong file BOQ ở bước 2.</span>
+        <b>Giá baseline <span class="muted">(không bắt buộc)</span></b>
+        <span class="muted small">Chỉ để so sánh trên màn hình, không ghi vào BOQ.</span>
         <span class="fname" id="n-base"></span>
       </label>
       <label class="drop small-drop" id="drop-sess">
         <input type="file" id="f-sess" accept=".json,.dgbq">
         <b>Mở phiên đã lưu</b>
-        <span class="muted small">Khôi phục nhóm tham khảo đã chọn, baseline nhập tay và ý kiến QS (.dgbq).</span>
+        <span class="muted small">Khôi phục nhóm đã chọn, giá tay, đơn giá bổ sung (.dgbq).</span>
         <span class="fname" id="n-sess"></span>
       </label>
     </div>
@@ -69,24 +75,24 @@
   <!-- Bước 2: cấu trúc -->
   <section class="card" id="step-map" hidden>
     <h2><span class="step">2</span> Kiểm tra cấu trúc bảng</h2>
-    <p class="muted small">Phần mềm đã tự nhận diện dòng tiêu đề và các cột. Cột "Đơn giá QS" là nơi QS nhập giá: sheet đánh giá sẽ đọc giá từ cột này. Sửa lại cột nếu nhận sai. Bỏ chọn sheet không cần đánh giá.</p>
+    <p class="muted small">Phần mềm đã tự nhận diện dòng tiêu đề và các cột. <b>Cột "Đơn giá" là nơi giá sẽ được điền</b> — kiểm tra kỹ cột này. Sửa lại cột nếu nhận sai, bỏ chọn sheet không cần điền giá.</p>
     <div class="tbl-wrap"><table class="map" id="map-tbl"></table></div>
-    <div class="dx-actions"><button class="btn primary" id="go">Tra giá tham khảo →</button></div>
+    <div class="dx-actions"><button class="btn primary" id="go">Tính giá điền →</button></div>
   </section>
 
   <!-- Bước 3: kết quả -->
   <section id="step-res" hidden>
     <div class="card opts">
+      <div class="opt"><label for="o-pick">Giá điền</label><select id="o-pick"></select></div>
+      <div class="opt"><label for="o-minfit">Chỉ điền khi khớp ≥</label><select id="o-minfit"><option value="cao">Cao</option><option value="tb" selected>Trung bình</option><option value="thap">Thấp</option></select></div>
+      <div class="opt"><label for="o-round">Làm tròn</label><select id="o-round"><option value="auto" selected>Tự động</option><option value="1000">1.000 đ</option><option value="100">100 đ</option><option value="none">Không</option></select></div>
+      <div class="opt"><label for="o-factor">Hệ số điều chỉnh</label><input id="o-factor" type="number" step="0.5" value="100"><span class="unit">%</span></div>
       <div class="opt"><label for="o-yfrom">Năm báo giá từ</label><input id="o-yfrom" type="number" min="2000" max="2100" placeholder="tất cả"></div>
       <div class="opt"><label for="o-yto">đến</label><input id="o-yto" type="number" min="2000" max="2100" placeholder="tất cả"></div>
       <div class="opt"><label>Loại hình dự án</label><details class="msel" id="o-type"><summary>Tất cả</summary><div class="msel-list"></div></details></div>
       <div class="opt"><label>Tỉnh/TP</label><details class="msel" id="o-prov"><summary>Tất cả</summary><div class="msel-list"></div></details></div>
-      <div class="opt"><label for="o-factor">Hệ số điều chỉnh giá CSDL</label><input id="o-factor" type="number" step="0.5" value="100"><span class="unit">%</span></div>
       <div class="opt"><label for="o-tol">Ngưỡng lệch baseline</label><input id="o-tol" type="number" value="10" step="1"><span class="unit">%</span></div>
-      <div class="opt chk"><label><input type="checkbox" id="o-review" checked> Bỏ dòng REVIEW</label><label><input type="checkbox" id="o-outlier" checked> Bỏ giá ngoại lai</label><label><input type="checkbox" id="o-warn"> Bỏ dòng có cảnh báo</label></div>
-      <div class="opt"><label for="o-ok">Hợp lý khi lệch P50 ≤</label><input id="o-ok" type="number" value="5" step="1"><span class="unit">%</span></div>
-      <div class="opt"><label for="o-bt">Bất thường khi lệch P50 &gt;</label><input id="o-bt" type="number" value="15" step="1"><span class="unit">%</span></div>
-      <div class="opt rule small muted">Đánh giá giá QS: <b>Hợp lý</b> khi trong P25–P75 hoặc lệch P50 không quá ngưỡng · <b>Bất thường</b> khi ngoài P10–P90 <i>và</i> lệch P50 vượt ngưỡng · còn lại <b>Cần xem</b>.</div>
+      <div class="opt chk"><label><input type="checkbox" id="o-review" checked> Bỏ dòng REVIEW</label><label><input type="checkbox" id="o-outlier" checked> Bỏ giá ngoại lai</label><label><input type="checkbox" id="o-warn"> Bỏ dòng có cảnh báo</label><label><input type="checkbox" id="o-overwrite"> Ghi đè ô đã có giá</label><label><input type="checkbox" id="o-amount" checked> Ô Thành tiền trống: điền = KL × Đơn giá</label></div>
     </div>
 
     <div class="kpis" id="kpis"></div>
@@ -95,21 +101,20 @@
       <button class="tab on" data-tab="lines">Chi tiết dòng</button>
       <button class="tab" data-tab="sum">Tổng hợp</button>
       <div class="spacer"></div>
-      <button class="btn" id="save-sess" title="Lưu nhóm tham khảo đã chọn, baseline, ý kiến để làm tiếp sau">Lưu phiên</button>
-      <button class="btn primary" id="dx-export">Xuất Excel tham khảo &amp; đánh giá</button>
+      <button class="btn" id="save-sess" title="Lưu nhóm đã chọn, giá tay, đơn giá bổ sung để làm tiếp sau">Lưu phiên</button>
+      <button class="btn primary" id="dx-export">Điền giá vào BOQ &amp; tải về</button>
     </div>
 
     <div id="tab-lines">
       <div class="toolbar">
         <div class="seg" id="flt">
           <button data-f="all" class="on">Tất cả</button>
-          <button data-f="bt">Bất thường</button>
-          <button data-f="xem">Cần xem</button>
-          <button data-f="ok">Hợp lý</button>
+          <button data-f="fill">Sẽ điền</button>
+          <button data-f="none">Không điền</button>
+          <button data-f="keep">Giữ giá có sẵn</button>
+          <button data-f="bt">Giá có sẵn bất thường</button>
           <button data-f="dev">Lệch baseline</button>
-          <button data-f="nogia">Chưa có giá QS</button>
-          <button data-f="notk">Không có tham khảo</button>
-          <button data-f="note">Có ý kiến</button>
+          <button data-f="note">Có ghi chú</button>
         </div>
         <input id="flt-q" type="search" placeholder="Lọc theo mô tả / mã…">
         <span class="muted small" id="flt-count"></span>
@@ -127,21 +132,7 @@
   <div id="dw-body"></div>
 </aside>
 
-<!-- Hộp thoại xuất file -->
-<div id="dlg" class="dlg" hidden>
-  <form class="dlg-box" id="dlg-form">
-    <h3>Xuất Excel tham khảo &amp; đánh giá</h3>
-    <p class="small"><b>Các sheet BOQ gốc giữ nguyên 100%</b>: không ghi vào ô nào, không đổi định dạng, độ rộng cột hay công thức. Phần mềm chỉ thêm sheet mới:</p>
-    <ul class="small">
-      <li><b>TK_DanhGia</b>: mỗi dòng BOQ một dòng, gồm giá tham khảo P10–P90, giá QS, vị trí, đánh giá, baseline, ý kiến. Giá QS và khối lượng là công thức trỏ về sheet gốc, nên đánh giá tự cập nhật khi QS sửa giá trong Excel.</li>
-    </ul>
-    <label><input type="checkbox" id="x-sum" checked> Thêm sheet TK_TongHop (tổng hợp theo sheet / hạng mục)</label>
-    <label class="admin-only"><input type="checkbox" id="x-ref" checked> Thêm sheet TK_NguonGia (các báo giá tham khảo, chỉ admin)</label>
-    <div class="dx-actions"><button type="button" class="btn" id="dlg-cancel">Hủy</button><button type="submit" class="btn primary">Xuất file</button></div>
-  </form>
-</div>
-
 <script src="../shared/crypto-web.js"></script>
-<script src="../shared/secure.js" data-build="admin" data-scripts="../shared/secure-ui.js,assets/pricing.js?v=2,assets/xlsx-io.js?v=2,assets/dxg-app.js?v=2"></script>
+<script src="../shared/secure.js" data-build="admin" data-scripts="../shared/secure-ui.js,assets/pricing.js?v=3,assets/xlsx-io.js?v=3,assets/dxg-app.js?v=3"></script>
 </body>
 </html>

@@ -267,6 +267,7 @@
       if (line.unit && !g.unit) score *= 0.92;
       else if (unitOk === false) score *= 0.6;
       score += 0.015 * Math.log10(1 + g.proj);
+      if (g.boost) score *= g.boost;   // vd đơn giá bổ sung của người dùng
       out.push({ g: gid, score: Math.min(1, score), cover, prec, unitOk, ratio: ratio === null ? 1 : ratio });
     }
     out.sort((a, b) => b.score - a.score);
