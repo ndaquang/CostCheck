@@ -22,7 +22,7 @@
     <div class="logo">ĐG</div>
     <div>
       <div class="title">Điền giá BOQ</div>
-      <div class="sub" id="db-meta"></div>
+      <div class="sub" id="dxg-meta"></div>
     </div>
   </div>
   <div class="spacer"></div>
@@ -42,24 +42,28 @@
       <label class="drop" id="drop-boq">
         <input type="file" id="f-boq" accept=".xlsx,.xlsm">
         <b>File BOQ cần điền giá</b>
+        <span class="btn primary pick">Nhập Excel BOQ…</span>
         <span class="muted small">Kéo thả hoặc bấm để chọn (.xlsx, .xlsm). Ô đơn giá đã có giá được giữ nguyên.</span>
         <span class="fname" id="n-boq"></span>
       </label>
       <label class="drop" id="drop-extra">
         <input type="file" id="f-extra" accept=".xlsx,.xlsm">
         <b>Đơn giá bổ sung <span class="muted">(không bắt buộc)</span></b>
+        <span class="btn pick">Nhập Excel đơn giá…</span>
         <span class="muted small">Báo giá NCC, BOQ đã có giá, bảng giá mới… có cột Mô tả, Đơn vị, Đơn giá. Được thêm vào CSDL của phiên và ưu tiên khi khớp. Nạp nhiều file được.</span>
         <span class="fname" id="n-extra"></span>
       </label>
       <label class="drop" id="drop-base">
         <input type="file" id="f-base" accept=".xlsx,.xlsm">
         <b>Giá baseline <span class="muted">(không bắt buộc)</span></b>
+        <span class="btn pick">Nhập Excel baseline…</span>
         <span class="muted small">Chỉ để so sánh trên màn hình, không ghi vào BOQ.</span>
         <span class="fname" id="n-base"></span>
       </label>
       <label class="drop small-drop" id="drop-sess">
         <input type="file" id="f-sess" accept=".json,.dgbq">
         <b>Mở phiên đã lưu</b>
+        <span class="btn pick">Mở phiên…</span>
         <span class="muted small">Khôi phục nhóm đã chọn, giá tay, đơn giá bổ sung (.dgbq).</span>
         <span class="fname" id="n-sess"></span>
       </label>
@@ -97,7 +101,8 @@
       <button class="tab" data-tab="sum">Tổng hợp</button>
       <div class="spacer"></div>
       <button class="btn" id="save-sess" title="Lưu nhóm đã chọn, giá tay, đơn giá bổ sung để làm tiếp sau">Lưu phiên</button>
-      <button class="btn primary" id="dx-export">Điền giá vào BOQ &amp; tải về</button>
+      <button class="btn" id="dx-report" title="Báo cáo từng dòng: giá điền, P10–P90, lý do — file Excel riêng, không ghi vào BOQ">Xuất báo cáo Excel</button>
+      <button class="btn primary" id="dx-export" title="Điền giá vào cột Đơn giá của chính file BOQ và tải về">Xuất Excel đã điền giá</button>
     </div>
 
     <div id="tab-lines">
@@ -122,7 +127,7 @@
 </main>
 
 <!-- Ngăn chi tiết dòng -->
-<aside id="drawer" hidden>
+<aside id="dxg-drawer" hidden>
   <div class="drawer-head"><b id="dw-title">Chi tiết dòng</b><button class="ghost" id="dw-close">✕</button></div>
   <div id="dw-body"></div>
 </aside>

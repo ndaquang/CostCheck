@@ -32,6 +32,8 @@
   const OWN = /^(TK|DX)_/;   // sheet do phiên bản cũ của phần mềm tạo, bỏ qua khi đọc
 
   let IX = null;
+  let DBX = null;   // CSDL module dùng: chính window.DB; sao chép riêng khi thêm đơn giá bổ sung để không đổi dữ liệu của app tra cứu
+  const EMBED = !!document.getElementById('dxg-tpl');   // nhúng trong app tra cứu (mục "Điền giá BOQ")
   const S = {
     wb: null, fileName: '', sheets: [], lines: [], items: [],
     baseList: null, baseName: '', extra: [], session: null,
@@ -40,8 +42,46 @@
     view: { f: 'all', q: '', shown: PAGE, tab: 'lines', cur: null },
   };
 
+  /* ---------- Nhúng trong app tra cứu: mục "Điền giá BOQ" trên thanh điều hướng (chỉ admin) ---------- */
+  function bootEmbed() {
+    const ds = new URLSearchParams(location.search).get('ds');
+    if (!ADMIN || ds === 'doithu') return;   // nhân viên / dữ liệu đối thủ: không có mục này
+    const sec = document.createElement('section');
+    sec.id = 'sec-dxg'; sec.hidden = true;
+    sec.appendChild(document.getElementById('dxg-tpl').content.cloneNode(true));
+    const last = document.getElementById('sec-analysis') || document.querySelector('section:last-of-type');
+    (last ? last.parentNode : document.body).insertBefore(sec, last ? last.nextSibling : null);
+    const nav = document.querySelector('.topnav');
+    if (nav) {
+      const a = document.createElement('a');
+      a.href = '#'; a.dataset.sec = 'dien-gia'; a.textContent = 'Điền giá BOQ'; a.title = 'Điền giá từ CSDL vào file BOQ Excel (admin)';
+      nav.insertBefore(a, nav.querySelector('.nav-dt'));
+    }
+    let started = false;
+    const show = on => {
+      sec.hidden = !on;
+      if (!on) { const d = $('#dxg-drawer'); if (d) d.hidden = true; return; }
+      if (started) return;
+      started = true;
+      const wait = () => (window.DB && window.DB.cols ? init() : setTimeout(wait, 200));
+      wait();
+    };
+    // app tra cứu tự ẩn các mục khác và đánh dấu nút; module chỉ bật / tắt mục của mình
+    document.addEventListener('click', e => {
+      const s = e.target.closest('.topnav [data-sec]');
+      if (s) { e.preventDefault(); show(s.dataset.sec === 'dien-gia'); }
+    });
+    // mở lại trang khi đang ở mục này (#sec=dien-gia)
+    const fromHash = () => new URLSearchParams(location.hash.slice(1)).get('sec') === 'dien-gia';
+    if (fromHash()) {
+      const go = () => (window.DB && window.DB.cols && !document.getElementById('splash') ? show(true) : setTimeout(go, 200));
+      go();
+    }
+  }
+
   /* ---------- Nạp cơ sở dữ liệu ---------- */
   function boot() {
+    if (EMBED) return bootEmbed();
     // Nhân viên chỉ dùng được khi admin bật cờ cho_nhan_vien trong build.py
     const meta = document.querySelector('meta[name="cho-nhan-vien"]');
     if (!ADMIN && !(meta && meta.content === '1')) {
@@ -63,26 +103,29 @@
     document.body.appendChild(s);
   }
   function rebuildIndex() {
-    IX = DXG.buildIndex(window.DB);
+    if (!DBX) DBX = window.DB;
+    IX = DXG.buildIndex(DBX);
     // đơn giá bổ sung (dữ liệu mới nhất của người dùng) được ưu tiên nhẹ khi khớp
-    const bs = S.extra.length ? (window.DB.projects || []).findIndex(p => p[0] === 'BOSUNG') : -1;
+    const bs = S.extra.length ? (DBX.projects || []).findIndex(p => p[0] === 'BOSUNG') : -1;
     if (bs >= 0) for (const g of IX.groups) if (g.rows.every(i => IX.C.p[i] === bs)) g.boost = 1.08;
     statCache = new Map();
-    $('#db-meta').textContent = `${NF.format(window.DB.count)} đơn giá${S.extra.length ? ` (gồm ${NF.format(S.extra.length)} bổ sung)` : ''} · ${NF.format(IX.groups.length)} nhóm công việc · giá quy về ${window.DB.baseYear || 2026} · cập nhật ${window.DB.built || ''}`;
+    const meta = $('#dxg-meta');
+    if (meta) meta.textContent = `${NF.format(DBX.count)} đơn giá${S.extra.length ? ` (gồm ${NF.format(S.extra.length)} bổ sung)` : ''} · ${NF.format(IX.groups.length)} nhóm công việc · giá quy về ${DBX.baseYear || 2026} · cập nhật ${DBX.built || ''}`;
   }
   function init() {
     const t0 = performance.now();
     rebuildIndex();
     buildOptions();
     bindUI();
-    $('#splash').remove();
+    if ($('#splash')) $('#splash').remove();
+    if (!window.writeWorkbook) $('#dx-report').hidden = true;   // báo cáo Excel dùng bộ ghi xlsx của app tra cứu
     console.log(`Chỉ mục điền giá: ${Math.round(performance.now() - t0)} ms, ${IX.groups.length} nhóm`);
   }
 
   /* ---------- Tùy chọn ---------- */
   function buildOptions() {
     $('#o-pick').innerHTML = Object.entries(PICK).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
-    const P = window.DB.projects || [];
+    const P = DBX.projects || [];
     const fill = (id, vals, set) => {
       const box = $(`#${id} .msel-list`);
       const list = [...new Set(vals.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi'));
@@ -179,8 +222,17 @@
       msg(`Đã thêm ${NF.format(list.length)} đơn giá bổ sung từ "${file.name}" vào CSDL của phiên làm việc.`, 'ok');
     } catch (e) { console.error(e); msg('Không đọc được file đơn giá bổ sung: ' + (e.message || e), 'err'); }
   }
+  // sao chép CSDL (một lần) trước khi thêm dòng, để dữ liệu của app tra cứu không bị đổi
+  function ownDB() {
+    if (DBX !== window.DB) return DBX;
+    const src = window.DB, cols = {}, dicts = {};
+    for (const [k, v] of Object.entries(src.cols)) cols[k] = Array.isArray(v) ? v.slice() : v;
+    for (const [k, v] of Object.entries(src.dicts || {})) dicts[k] = Array.isArray(v) ? v.slice() : v;
+    DBX = { ...src, cols, dicts, projects: (src.projects || []).slice() };
+    return DBX;
+  }
   function addExtraRows(list, fileName) {
-    const DB = window.DB, C = DB.cols, D = DB.dicts;
+    const DB = ownDB(), C = DB.cols, D = DB.dicts;
     DB.projects = DB.projects || [];
     let pi = DB.projects.findIndex(p => p[0] === 'BOSUNG');
     if (pi < 0) { DB.projects.push(['BOSUNG', 'Đơn giá bổ sung', '', '', '', '']); pi = DB.projects.length - 1; }
@@ -470,14 +522,14 @@
   }
 
   /* ---------- Ngăn chi tiết ---------- */
-  const projOf = i => (window.DB.projects || [])[IX.C.p ? IX.C.p[i] : -1] || [];
+  const projOf = i => (DBX.projects || [])[IX.C.p ? IX.C.p[i] : -1] || [];
   function openDrawer(it) {
     if (!it) return;
-    S.view.cur = it; renderDrawer(it); $('#drawer').hidden = false;
+    S.view.cur = it; renderDrawer(it); $('#dxg-drawer').hidden = false;
     $$('#res-tbl tr.sel').forEach(r => r.classList.remove('sel'));
     const tr = $(`#res-tbl tr[data-id="${CSS.escape(it.id)}"]`); if (tr) tr.classList.add('sel');
   }
-  function closeDrawer() { S.view.cur = null; $('#drawer').hidden = true; $$('#res-tbl tr.sel').forEach(r => r.classList.remove('sel')); }
+  function closeDrawer() { S.view.cur = null; $('#dxg-drawer').hidden = true; $$('#res-tbl tr.sel').forEach(r => r.classList.remove('sel')); }
   // Thanh phân bố P10–P90, giá điền và baseline
   function distBar(c) {
     if (!c.ref) return '';
@@ -631,6 +683,28 @@
     S.wb = await XLSXIO.read(await blob.arrayBuffer());
     return { written, skipped };
   }
+  // Báo cáo kết quả: file Excel RIÊNG (không ghi vào BOQ) — dùng bộ ghi xlsx của app tra cứu
+  function exportReport() {
+    const FIT_T = { cao: 'Cao', tb: 'Trung bình', thap: 'Thấp', none: 'Không khớp' };
+    const st = c => c.fill ? 'Đã điền' : isNum(c.price) ? 'Giữ giá có sẵn' : 'Để trống — QS định giá';
+    const t = totals(S.items), o = S.opt;
+    const sum = [['Chỉ tiêu', 'Giá trị'],
+      ['File BOQ', S.fileName], ['Cách chọn giá', PICK[o.pick].label], ['Đơn giá bổ sung', S.extra.length ? `${S.extra.length} giá` : 'không'],
+      ['Dòng hạng mục', t.n], ['Sẽ điền / đã điền', t.fill], ['Giữ giá có sẵn', t.keep], ['Để trống — QS định giá', t.none],
+      ['Tổng giá trị sau khi điền', Math.round(t.amt)], ['  trong đó phần điền mới', Math.round(t.amtFill)],
+      ['CSDL', `${NF.format(DBX.count)} đơn giá · giá quy về ${DBX.baseYear || 2026} · cập nhật ${DBX.built || ''}`], ['Lập lúc', new Date().toLocaleString('vi-VN', { hour12: false })]];
+    const det = [['Sheet', 'Dòng', 'Mã', 'Mô tả', 'Tiêu đề gần nhất', 'ĐV', 'KL', 'Nhóm tham khảo CSDL', 'Độ phù hợp', 'Số BG', 'P10', 'P25', 'P50', 'P75', 'P90', 'Đơn giá', 'Thành tiền', 'Trạng thái', 'Lý do', 'Ghi chú']];
+    for (const it of S.items) {
+      const c = it.c, g = c.shown ? IX.groups[c.cand.g] : null, R = c.ref;
+      det.push([it.sheet, it.r + 1, it.code, it.desc, it.heads[it.heads.length - 1] || '', it.unit, it.qty, g ? g.name : '', c.cand ? FIT_T[c.fit.level] : '', g ? c.st.n : null,
+        ...(R ? [R.p10, R.p25, R.p50, R.p75, R.p90].map(Math.round) : [null, null, null, null, null]), c.price, isNum(c.amt) ? Math.round(c.amt) : null, st(c), c.why, it.note]);
+    }
+    const blob = window.writeWorkbook([
+      { name: 'Tóm tắt', rows: sum, widths: [32, 70], nums: new Set([1]) },
+      { name: 'Chi tiết', rows: det, widths: [14, 6, 6, 48, 30, 7, 10, 38, 11, 7, 11, 11, 11, 11, 11, 12, 15, 20, 38, 30], nums: new Set([10, 11, 12, 13, 14, 15, 16]) },
+    ]);
+    download(blob, S.fileName.replace(/\.(xlsx|xlsm)$/i, '') + '_BaoCaoDienGia.xlsx');
+  }
   function download(blob, name) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name;
@@ -677,13 +751,14 @@
       if (e.target.id === 'dw-q') { e.preventDefault(); drawerSearch(S.view.cur); }
       else if (e.target.id === 'dw-manual' || e.target.id === 'dw-base') { e.preventDefault(); drawerAction({ target: { dataset: { do: 'apply' }, closest: () => null } }); }
     });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.view.cur) closeDrawer(); });
     $$('.tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     $('#save-sess').addEventListener('click', saveSession);
+    $('#dx-report').addEventListener('click', () => { try { exportReport(); } catch (ex) { console.error(ex); msg('Không xuất được báo cáo: ' + (ex.message || ex), 'err'); } });
     $('#dx-export').addEventListener('click', async () => {
       const btn = $('#dx-export'); btn.disabled = true; btn.textContent = 'Đang điền giá…';
       try { await exportXlsx(); } catch (ex) { console.error(ex); msg('Không xuất được file: ' + (ex.message || ex), 'err'); }
-      btn.disabled = false; btn.textContent = 'Điền giá vào BOQ & tải về';
+      btn.disabled = false; btn.textContent = 'Xuất Excel đã điền giá';
       $('#load-msg').scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
   }

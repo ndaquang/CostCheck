@@ -52,3 +52,19 @@ if (require.main === module) {
   require('fs').writeFileSync(out, 'window.DB = ' + JSON.stringify(makeDB()) + ';\n');
   console.log('wrote', out);
 }
+
+// Bổ sung các cột / từ điển mà app tra cứu cần (để kiểm thử module khi ghép vào app chính)
+function fullDB(db) {
+  const N = db.count, C = db.cols, D = db.dicts;
+  const num = ['c', 'f', 'cur', 'chk', 'loc', 'w', 'e', 'n', 'par', 'vt', 'sh', 'src', 'st', 'ol', 'warn', 'g', 'gn', 'u', 'cu', 'p'];
+  for (const k of num) if (!C[k]) C[k] = new Array(N).fill(-1);
+  for (const k of ['mat', 'lab', 'mac', 'why', 'oname', 'code', 'row']) if (!C[k]) C[k] = new Array(N).fill(null);
+  if (!C.dup) C.dup = new Array(N).fill(1);
+  if (!C.id) C.id = Array.from({ length: N }, (_, i) => 'R' + i);
+  if (!C.spec) C.spec = new Array(N).fill('');
+  for (const k of ['c', 'f', 'cur', 'chk', 'loc', 'w', 'e', 'par', 'vt', 'sh', 'src', 'st', 'ol', 'warn', 'g', 'gn', 'u', 'cu', 'p']) if (!D[k]) D[k] = [];
+  if (!D.p.length) D.p = db.projects.map(p => p[0]);
+  db.nrm2 = db.nrm2 || [];
+  return db;
+}
+module.exports.fullDB = fullDB;

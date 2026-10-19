@@ -66,7 +66,7 @@ const srv = http.createServer((req, res) => {
   const names = await page.$$eval('#res-tbl tbody tr[data-id] td.grp', tds => tds.map(td => td.childNodes[0] ? td.childNodes[0].textContent.trim() : ''));
   const counts = await page.evaluate(() => ({ note: window.__DXG_STATE.lines.filter(l => l.kind === 'note').length, head: window.__DXG_STATE.lines.filter(l => l.kind === 'head').length, extra: window.__DXG_STATE.extra.length }));
   const firstFill = await page.$('#res-tbl tbody tr[data-id]');
-  if (firstFill) { await firstFill.click(); await page.waitForSelector('#drawer:not([hidden])'); await page.screenshot({ path: path.join(OUT, '3_chi_tiet_dong.png') }); await page.click('#dw-close'); }
+  if (firstFill) { await firstFill.click(); await page.waitForSelector('#dxg-drawer:not([hidden])'); await page.screenshot({ path: path.join(OUT, '3_chi_tiet_dong.png') }); await page.click('#dw-close'); }
   t0 = Date.now();
   let outFile = null;
   if (rows.some(r => r.dien)) {

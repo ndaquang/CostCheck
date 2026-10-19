@@ -97,7 +97,7 @@ print(json.dumps([[ws.cell(r,4).value, ws.cell(r,5).value, ws.cell(r,7).value] f
   check(by('Xay dung|13').price === 61000, 'đơn giá bổ sung được ưu tiên hơn CSDL cũ (Sơn tường): ' + by('Xay dung|13').price);
 
   console.log('5. Giá tay + lưu / khôi phục phiên');
-  await page.click('#res-tbl tr[data-id="Xay dung|12"]'); await page.waitForSelector('#drawer:not([hidden])');
+  await page.click('#res-tbl tr[data-id="Xay dung|12"]'); await page.waitForSelector('#dxg-drawer:not([hidden])');
   await page.fill('#dw-manual', '97000'); await page.click('[data-do=apply]');
   await page.screenshot({ path: path.join(WORK, 'drawer.png') });
   await page.click('#dw-close');

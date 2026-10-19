@@ -1,5 +1,8 @@
 'use strict';
-/* Kiểm thử bản đã dựng (CSP + cổng đăng nhập + gói .dgbw mã hóa) cho quyền admin và nhân viên.
+/* Kiểm thử bản đã dựng docs/ (CSP + cổng đăng nhập + gói .dgbw mã hóa): module Điền giá BOQ GHÉP trong app tra cứu.
+   • admin: có mục "Điền giá BOQ" trên thanh điều hướng, dùng chung CSDL đã nạp (không đăng nhập lại),
+     nhập Excel → điền giá → xuất Excel (chỉ ô trống thay đổi) + xuất báo cáo; mục Tra cứu vẫn chạy bình thường.
+   • nhân viên: không có mục này.
    Dùng: node tests/e2e_gate.js <thư mục tạm>   — chạy sau `python build.py --module`. Gói dữ liệu là giả lập. */
 const fs = require('fs'), path = require('path'), http = require('http'), zlib = require('zlib');
 const { webcrypto: wc } = require('crypto');
@@ -25,7 +28,7 @@ async function makePackage() {
     return b64(Buffer.concat([Buffer.from('DGW1'), iv, Buffer.from(ct)]));
   };
   const user = async (ten, admin) => ({ ten_dang_nhap: ten, ho_ten: ten.toUpperCase(), hoat_dong: true, salt: b64(salt), kdf: { iter }, khoa: { nv: await wrap(keyNv, `${ten}|nv`), ...(admin ? { admin: await wrap(keyAd, `${ten}|admin`) } : {}) } });
-  return { dinh_dang: 'DGW1', users: [await user('admin', true), await user('nv1', false)], khoi: { db: { khoa: 'nv', du_lieu: await block(require('./fixture_db.js').makeDB(), keyNv, 'db') } } };
+  return { dinh_dang: 'DGW1', users: [await user('admin', true), await user('nv1', false)], khoi: { db: { khoa: 'nv', du_lieu: await block((({ makeDB, fullDB }) => fullDB(makeDB()))(require('./fixture_db.js')), keyNv, 'db') } } };
 }
 
 function serve(dir) {
@@ -37,61 +40,69 @@ function serve(dir) {
   }).listen(0);
 }
 
-async function run(browser, site, user, label) {
-  const srv = serve(site);
-  const page = await browser.newPage({ acceptDownloads: true });
-  const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('console', m => { if (['error', 'warning'].includes(m.type()) && /Content Security|Refused|Error/i.test(m.text())) errs.push(m.text()); });
-  await page.goto(`http://127.0.0.1:${srv.address().port}/de-xuat-gia/index.html`);
+const login = async (page, port, user) => {
+  await page.goto(`http://127.0.0.1:${port}/index.html`);
   await page.setInputFiles('#gate-file', path.join(WORK, 'test.dgbw'));
   await page.fill('#gate-user', user); await page.fill('#gate-pass', 'matkhau');
   await page.click('#gate-go');
   await page.waitForSelector('#splash', { state: 'detached', timeout: 20000 });
-  const who = await page.textContent('.userbox .who');
-  await page.setInputFiles('#f-boq', path.join(WORK, 'BOQ_mau.xlsx'));
-  await page.waitForFunction(() => !document.querySelector('#step-map').hidden || document.querySelector('#load-msg').classList.contains('err'));
-  if (await page.$('#load-msg.err')) throw new Error(`[${label}] ` + await page.textContent('#load-msg') + ' ' + errs.join(' | '));
-  await page.click('#go');
-  await page.waitForSelector('#step-res:not([hidden])');
-  await page.click('#res-tbl tr[data-id="Xay dung|5"]');
-  const hasProj = await page.$$eval('#dw-body table.refs th', ths => ths.some(t => t.textContent === 'Dự án'));
-  await page.click('#dw-close');
-  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#dx-export')]);
-  const out = path.join(WORK, `${label}_${dl.suggestedFilename()}`); await dl.saveAs(out);
-  const sheets = execFileSync('python3', ['-c', `from openpyxl import load_workbook as L;print(L(${JSON.stringify(out)}).sheetnames)`]).toString().trim();
-  console.log(`[${label}] ${who.trim()} · cột Dự án trong tham chiếu: ${hasProj} · sheets: ${sheets}`);
-  if (errs.length) { console.error(`[${label}] LỖI:`, errs); process.exitCode = 1; }
-  await page.close(); srv.close();
-  return { hasProj, sheets };
-}
+};
+let fails = 0; const check = (ok, text) => { console.log(`  ${ok ? '✓' : '✗'} ${text}`); if (!ok) fails++; };
 
 (async () => {
   fs.writeFileSync(path.join(WORK, 'test.dgbw'), JSON.stringify(await makePackage()));
-  // bản nhân viên: dựng bằng chính build.py — mặc định (chỉ admin) thì không có module; bật cờ thì có
-  const build = (dir, flag) => {
-    fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir);
-    fs.cpSync(path.join(ROOT, 'shared'), path.join(dir, 'shared'), { recursive: true });
-    execFileSync('python3', ['-c', `import sys; sys.path.insert(0, ${JSON.stringify(ROOT)}); import build; build.dung_module(${JSON.stringify(dir)}, 'nhan_vien', ${flag}); build.kiem_tra_dau_ra(${JSON.stringify(dir)})`]);
-  };
-  const nvMacDinh = path.join(WORK, 'nv_mac_dinh'), nvMo = path.join(WORK, 'nv_mo');
-  build(nvMacDinh, 'None'); build(nvMo, 'True');
-  if (fs.existsSync(path.join(nvMacDinh, 'de-xuat-gia'))) { console.error('bản nhân viên mặc định không được chứa module'); process.exitCode = 1; }
-  else console.log('[nv mặc định] bản nhân viên không chứa module ✓');
+  const DOCS = path.join(ROOT, 'docs');
+  const srv = serve(DOCS), port = srv.address().port;
   const browser = await pw.chromium.launch();
-  const a = await run(browser, path.join(ROOT, 'docs'), 'admin', 'admin');
-  const b = await run(browser, nvMo, 'admin', 'nv-mo');   // bản nhân viên: tài khoản admin cũng chỉ có quyền nhân viên
-  if (!a.hasProj) { console.error('admin phải thấy tên dự án trong báo giá tham khảo'); process.exitCode = 1; }
-  if (b.hasProj) { console.error('nhân viên không được thấy tên dự án'); process.exitCode = 1; }
-  for (const x of [a, b]) if (x.sheets !== "['Xay dung', 'Hoan thien']") { console.error('file điền giá không được thêm sheet: ' + x.sheets); process.exitCode = 1; }
-  // tài khoản nhân viên mở bản admin: bị chặn
-  {
-    const srv = serve(path.join(ROOT, 'docs')), page = await browser.newPage();
-    await page.goto(`http://127.0.0.1:${srv.address().port}/de-xuat-gia/index.html`);
-    await page.setInputFiles('#gate-file', path.join(WORK, 'test.dgbw'));
-    await page.fill('#gate-user', 'nv1'); await page.fill('#gate-pass', 'matkhau'); await page.click('#gate-go');
-    await page.waitForFunction(() => /chỉ dành cho tài khoản admin/.test(document.querySelector('#splash-msg').textContent), null, { timeout: 15000 });
-    console.log('[nv1 trên bản admin] bị chặn ✓');
-    await page.close(); srv.close();
-  }
-  await browser.close();
-  console.log(process.exitCode ? 'THẤT BẠI' : 'Đạt.');
+
+  console.log('admin');
+  const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 1440, height: 950 } });
+  const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('console', m => { if (['error', 'warning'].includes(m.type()) && /Content Security|Refused|Error/i.test(m.text())) errs.push(m.text()); });
+  await login(page, port, 'admin');
+  const navs = await page.$$eval('.topnav a', as => as.map(a => a.textContent.trim()));
+  check(navs.includes('Điền giá BOQ'), 'thanh điều hướng có mục "Điền giá BOQ": ' + navs.join(' | '));
+  await page.click('.topnav [data-sec="dien-gia"]');
+  await page.waitForSelector('#sec-dxg:not([hidden])');
+  check(await page.isHidden('#sec-search'), 'mở mục Điền giá BOQ thì ẩn mục Tra cứu');
+  await page.screenshot({ path: path.join(WORK, 'embed_1.png') });
+  await page.setInputFiles('#f-boq', path.join(WORK, 'BOQ_mau.xlsx'));
+  await page.waitForSelector('#step-map:not([hidden])');
+  await page.click('#go'); await page.waitForSelector('#step-res:not([hidden])');
+  const nFill = await page.evaluate(() => window.__DXG_STATE.items.filter(it => it.c.fill).length);
+  check(nFill >= 10, `dùng chung CSDL của app, không đăng nhập lại: ${nFill} dòng sẽ điền`);
+  await page.click('#res-tbl tr[data-id="Xay dung|5"]'); await page.waitForSelector('#dxg-drawer:not([hidden])');
+  check(await page.$$eval('#dw-body table.refs th', ths => ths.some(t => t.textContent === 'Dự án')), 'admin thấy tên dự án trong báo giá tham khảo');
+  await page.screenshot({ path: path.join(WORK, 'embed_drawer.png') });
+  await page.click('#dw-close');
+  await page.screenshot({ path: path.join(WORK, 'embed_2.png'), fullPage: true });
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#dx-export')]);
+  const out = path.join(WORK, 'embed_' + dl.suggestedFilename()); await dl.saveAs(out);
+  try { console.log('  ✓ ' + execFileSync('python3', [path.join(__dirname, 'verify_fill.py'), path.join(WORK, 'BOQ_mau.xlsx'), out]).toString().trim()); }
+  catch (e) { console.log('  ✗ ' + e.stdout); fails++; }
+  const [rp] = await Promise.all([page.waitForEvent('download'), page.click('#dx-report')]);
+  const rep = path.join(WORK, rp.suggestedFilename()); await rp.saveAs(rep);
+  const sheets = execFileSync('python3', ['-c', 'from openpyxl import load_workbook as L;import sys;w=L(sys.argv[1]);print(w.sheetnames, w["Chi tiết"].max_row)', rep]).toString().trim();
+  check(/Tóm tắt.*Chi tiết.*\s14$/.test(sheets), 'xuất báo cáo Excel riêng: ' + sheets);
+  // quay lại Tra cứu: app vẫn chạy
+  await page.click('.topnav [data-sec="tra-cuu"]');
+  check(await page.isHidden('#sec-dxg') && !(await page.isHidden('#sec-search')), 'quay lại mục Tra cứu bình thường');
+  await page.fill('#q', 'be tong'); await page.waitForTimeout(400);
+  check((await page.textContent('#count')).trim().length > 0, 'tra cứu vẫn hoạt động: ' + (await page.textContent('#count')).trim().slice(0, 40));
+  // mở lại trang ở mục Điền giá (#sec=dien-gia) sau khi đăng nhập lại
+  await page.click('.topnav [data-sec="dien-gia"]');
+  const hash = await page.evaluate(() => location.hash);
+  check(/sec=dien-gia/.test(hash), 'địa chỉ trang ghi nhớ mục đang mở: ' + hash);
+  if (errs.length) { console.error('  LỖI:', errs); fails++; }
+  await page.close();
+
+  console.log('nhân viên');
+  const p2 = await browser.newPage();
+  await login(p2, port, 'nv1');
+  const navs2 = await p2.$$eval('.topnav a', as => as.filter(a => a.offsetParent).map(a => a.textContent.trim()));
+  check(!navs2.includes('Điền giá BOQ') && !(await p2.$('#sec-dxg')), 'nhân viên không có mục Điền giá BOQ: ' + navs2.join(' | '));
+  await p2.close();
+
+  await browser.close(); srv.close();
+  console.log(fails ? `THẤT BẠI: ${fails}` : 'Đạt.');
+  process.exitCode = fails ? 1 : 0;
 })().catch(e => { console.error(e); process.exit(1); });

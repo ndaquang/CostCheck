@@ -2,6 +2,23 @@
 
 Module lấy **giá tốt nhất** từ CSDL đơn giá (gói `.dgbw`, dùng chung với app Tra cứu) và **điền thẳng vào cột Đơn giá của file BOQ**.
 
+## Vị trí trong phần mềm
+Module là mục **"Điền giá BOQ"** trên thanh điều hướng của app Tra cứu đơn giá, cạnh Tra cứu / Điểm rơi giá / Phân tích. **Chỉ tài khoản admin thấy mục này.** Module dùng chung lần đăng nhập và CSDL đã nạp của app, không cần đăng nhập lại.
+
+Mã nguồn module vẫn nằm riêng trong `modules/de_xuat_gia/`. `build.py` ghép module vào app khi dựng:
+- chép mã vào `docs/assets/dxg/`;
+- giới hạn CSS trong `#sec-dxg` để không ảnh hưởng giao diện app;
+- chèn giao diện dạng `<template>`.
+
+Sau khi sửa module, chạy `python build.py --module` để ghép lại. Lệnh này không cần thư mục `WEB/`.
+
+Trên giao diện có các nút:
+- **Nhập Excel BOQ…**: file cần điền giá.
+- **Nhập Excel đơn giá…**: đơn giá bổ sung.
+- **Nhập Excel baseline…**
+- **Xuất Excel đã điền giá**: BOQ gốc được điền giá vào cột Đơn giá.
+- **Xuất báo cáo Excel**: file riêng gồm sheet Tóm tắt và Chi tiết từng dòng.
+
 ## Nguyên tắc
 - **Không thêm sheet, không thêm cột.** Phần mềm chỉ ghi số vào ô Đơn giá đang trống. Style ô, ô gộp, độ rộng cột, vùng in, liên kết ngoài và mọi công thức sẵn có đều giữ nguyên.
 - Ô đã có giá, ô công thức, ô chữ không bao giờ bị ghi. Muốn ghi đè ô đã có giá thì bật tùy chọn "Ghi đè ô đã có giá".
@@ -52,7 +69,7 @@ Baseline (nếu nạp) chỉ dùng để so sánh trên màn hình, không ghi v
 
 ```
 modules/de_xuat_gia/
-  index.html            giao diện (nguồn, chưa có cổng đăng nhập)
+  index.html            giao diện: trang chạy thử độc lập; phần <main> và ngăn chi tiết được ghép vào app khi dựng
   assets/pricing.js     lõi: nhận diện BOQ, khớp nhóm, thống kê giá, baseline (chạy được trong Node)
   assets/xlsx-io.js     đọc .xlsx, điền giá bằng cách sửa đúng ô trong XML, không ghi lại cả sheet (không cần thư viện ngoài)
   assets/dxg-app.js     giao diện, tính giá điền, điền vào BOQ, đơn giá bổ sung, lưu phiên
@@ -60,7 +77,7 @@ modules/de_xuat_gia/
   tests/                dữ liệu giả lập + kiểm thử
 ```
 
-Dựng: `python build.py` (app tra cứu + module) hoặc `python build.py --module` (chỉ module). Kết quả nằm ở `docs/de-xuat-gia/`.
+Dựng: `python build.py` (app tra cứu + ghép module) hoặc `python build.py --module` (chỉ ghép lại module vào `docs/`).
 
 ## Chạy thử với dữ liệu giả lập
 
@@ -94,7 +111,7 @@ Kết quả gồm file `<tên>_DaDienGia.xlsx` (BOQ đã điền giá) và báo 
 node modules/de_xuat_gia/tests/test_pricing.js          # lõi: khớp, đơn vị, bộ lọc, nhận diện cột, baseline
 node modules/de_xuat_gia/tests/e2e.js <thư mục tạm>      # Chromium + LibreOffice: điền giá P25, chỉ ô trống thay đổi,
                                                          # Thành tiền/Tổng tính lại, giữ giá QS có sẵn, đơn giá bổ sung, phiên
-node modules/de_xuat_gia/tests/e2e_gate.js <thư mục tạm> # bản đã dựng: CSP + cổng đăng nhập + phân quyền
+node modules/de_xuat_gia/tests/e2e_gate.js <thư mục tạm> # app đã dựng (docs/): mục Điền giá BOQ trong app, CSP + đăng nhập, admin / nhân viên
 python modules/de_xuat_gia/tests/verify_fill.py <BOQ gốc> <file đã điền>  # chỉ các ô trống được điền, mọi thứ khác giữ nguyên
 ```
 
