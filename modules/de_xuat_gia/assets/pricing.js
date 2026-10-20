@@ -419,10 +419,85 @@
     }
   }
 
+  /* ---------- Gộp nhiều nguồn giá vào một CSDL ---------- */
+  // Mỗi dòng mang nhãn nguồn (cột ns, từ điển D.ns: 'Nội bộ', 'Đối thủ', 'CTG', 'Bổ sung'…) để lọc và thống kê theo nguồn.
+  function tagSource(DB, label) {
+    const C = DB.cols, D = DB.dicts = DB.dicts || {};
+    if (!D.ns) D.ns = [];
+    if (!C.ns) { if (!D.ns.length) D.ns.push('Nội bộ'); C.ns = new Array(DB.count).fill(0); }
+    let k = D.ns.indexOf(label);
+    if (k < 0) { D.ns.push(label); k = D.ns.length - 1; }
+    return k;
+  }
+  // Gộp CSDL src (cùng định dạng window.DB) vào dst — dst phải là bản sao riêng vì bị sửa tại chỗ.
+  // Nhóm đại diện của src trùng tên + đơn vị với một nhóm của dst được gộp vào nhóm đó (giá hai nguồn chung một phân bố);
+  // nhóm chưa có thì thêm mới. -> { dong, nhomChung, nhomMoi, lechNam }
+  function mergeDB(dst, src, label) {
+    const C = dst.cols, D = dst.dicts, SC = src.cols, SD = src.dicts || {}, N0 = dst.count, M = src.count;
+    tagSource(dst, 'Nội bộ');
+    const ns = tagSource(dst, label);
+    const col = (cols, k) => Array.isArray(cols[k]);
+    const gName = (cols, dicts, i) => col(cols, 'gn') && cols.gn[i] >= 0 && dicts.gn ? dicts.gn[cols.gn[i]] : col(cols, 'g') && cols.g[i] >= 0 && dicts.g ? dicts.g[cols.g[i]] : null;
+    const uName = (cols, dicts, i) => col(cols, 'cu') && cols.cu[i] >= 0 && dicts.cu ? dicts.cu[cols.cu[i]] : col(cols, 'u') && cols.u[i] >= 0 && dicts.u ? dicts.u[cols.u[i]] : '';
+    const gKey = (name, unit) => norm(name) + '|' + parseUnit(unit).base;
+    const lookup = new Map();
+    const dictIdx = (k, v) => {
+      if (v === null || v === undefined) return -1;
+      let m = lookup.get(k);
+      if (!m) { m = new Map(); (D[k] || (D[k] = [])).forEach((x, j) => { if (!m.has(x)) m.set(x, j); }); lookup.set(k, m); }
+      let j = m.get(v);
+      if (j === undefined) { D[k].push(v); j = D[k].length - 1; m.set(v, j); }
+      return j;
+    };
+    // nhóm của dst theo tên + đơn vị
+    const gDst = new Map();
+    if (col(C, 'g')) for (let i = 0; i < N0; i++) if (C.g[i] >= 0) { const k = gKey(gName(C, D, i), uName(C, D, i)); if (!gDst.has(k)) gDst.set(k, [C.g[i], col(C, 'gn') ? C.gn[i] : -1]); }
+    const gMap = new Map();   // nhóm src -> [g, gn] ở dst
+    let chung = 0, moi = 0;
+    const mapGroup = i => {
+      if (!col(SC, 'g') || SC.g[i] < 0 || !col(C, 'g')) return [-1, -1];
+      const sg = SC.g[i];
+      if (gMap.has(sg)) return gMap.get(sg);
+      const name = gName(SC, SD, i), k = gKey(name, uName(SC, SD, i));
+      let r = gDst.get(k);
+      if (r) chung++;
+      else {
+        D.g = D.g || []; D.g.push(SD.g ? SD.g[sg] : name);
+        let gn = -1; if (col(C, 'gn')) { D.gn = D.gn || []; D.gn.push(name); gn = D.gn.length - 1; }
+        r = [D.g.length - 1, gn]; gDst.set(k, r); moi++;
+      }
+      gMap.set(sg, r);
+      return r;
+    };
+    // dự án của src nối vào cuối danh sách dự án
+    dst.projects = dst.projects || [];
+    const pOff = dst.projects.length;
+    for (const p of src.projects || []) { dst.projects.push(p.slice()); if (Array.isArray(D.p)) D.p.push(p[0]); }
+    const keys = Object.keys(C).filter(k => col(C, k));
+    for (let i = 0; i < M; i++) {
+      const [g, gn] = mapGroup(i);
+      for (const k of keys) {
+        let v;
+        if (k === 'ns') v = ns;
+        else if (k === 'p') v = col(SC, 'p') && SC.p[i] >= 0 ? pOff + SC.p[i] : -1;
+        else if (k === 'g') v = g;
+        else if (k === 'gn') v = gn;
+        else if (Array.isArray(D[k])) v = col(SC, k) && SC[k][i] >= 0 && SD[k] ? dictIdx(k, SD[k][SC[k][i]]) : -1;   // cột mã hóa theo từ điển
+        else v = col(SC, k) ? SC[k][i] : null;
+        C[k].push(v);
+      }
+    }
+    dst.count = N0 + M;
+    return { dong: M, nhomChung: chung, nhomMoi: moi, lechNam: !!(src.baseYear && dst.baseYear && src.baseYear !== dst.baseYear) };
+  }
+  // Dòng thuộc nguồn đang bị tắt (f.srcOff: Set nhãn nguồn) — lọc cứng, không bao giờ nới
+  const srcOff = (IX, i, f) => !!(f.srcOff && f.srcOff.size && IX.has('ns') && f.srcOff.has(IX.D.ns[IX.C.ns[i]]));
+
   /* ---------- Thống kê giá nhóm theo bộ lọc ---------- */
-  // f: { yearFrom, yearTo, types:Set, provs:Set, excludeReview, excludeOutlier, excludeWarn }
+  // f: { yearFrom, yearTo, types:Set, provs:Set, excludeReview, excludeOutlier, excludeWarn, srcOff:Set }
   function rowPass(IX, i, f) {
     const { C, D, DB, has } = IX;
+    if (srcOff(IX, i, f)) return false;
     if (f.yearFrom && !((C.y[i] || 0) >= f.yearFrom)) return false;
     if (f.yearTo && !((C.y[i] || 9999) <= f.yearTo)) return false;
     if (f.excludeReview && has('st') && C.st[i] >= 0 && D.st[C.st[i]] === 'REVIEW') return false;
@@ -439,14 +514,16 @@
     const g = IX.groups[gid];
     let ids = g.rows.filter(i => rowPass(IX, i, f));
     let relaxed = false;
-    if (!ids.length && g.rows.length) { ids = g.rows.filter(i => rowPass(IX, i, { excludeReview: f.excludeReview })); relaxed = true; }
-    if (!ids.length) { ids = g.rows.slice(); relaxed = true; }
-    const v = Float64Array.from(ids, i => IX.price(i) * ratio).sort();
+    // không còn mẫu: nới các bộ lọc khác, riêng nguồn đã tắt thì vẫn loại
+    if (!ids.length && g.rows.length) { ids = g.rows.filter(i => rowPass(IX, i, { excludeReview: f.excludeReview, srcOff: f.srcOff })); relaxed = true; }
+    if (!ids.length) { ids = g.rows.filter(i => !srcOff(IX, i, f)); relaxed = true; }
+    const v = Float64Array.from(ids, i => IX.price(i) * ratio).sort();   // có thể rỗng khi mọi báo giá của nhóm thuộc nguồn đã tắt
     const { C, has } = IX;
     let latest = 0, latestPrice = null, sum = 0, mat = [], lab = [];
-    const proj = new Set();
+    const proj = new Set(), src = {};
     for (const i of ids) {
       if (has('p')) proj.add(C.p[i]);
+      if (has('ns')) { const l = IX.D.ns[C.ns[i]]; src[l] = (src[l] || 0) + 1; }
       const y = C.y[i] || 0;
       if (y > latest || (y === latest && latestPrice === null)) { latest = y; }
       const t = C.tot[i];
@@ -459,7 +536,7 @@
     latestPrice = qtile(recent, 0.5);
     mat.sort((a, b) => a - b); lab.sort((a, b) => a - b);
     return {
-      ids, sorted: v, n: v.length, proj: proj.size, relaxed,
+      ids, sorted: v, n: v.length, proj: proj.size, relaxed, src,
       med: qtile(v, 0.5), p10: qtile(v, 0.1), p25: qtile(v, 0.25), p75: qtile(v, 0.75), p90: qtile(v, 0.9),
       min: v[0], max: v[v.length - 1], mean: sum / (v.length || 1), latest, latestPrice,
       matShare: mat.length >= 2 ? qtile(mat, 0.5) : null, labShare: lab.length >= 2 ? qtile(lab, 0.5) : null,
@@ -674,5 +751,5 @@
     return { d, pct: baseline ? d / baseline : null, amt: isNum(qty) ? d * qty : null };
   }
 
-  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, diff, toNum, COLS, PROP_HEAD };
+  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, tagSource, mergeDB, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, diff, toNum, COLS, PROP_HEAD };
 });

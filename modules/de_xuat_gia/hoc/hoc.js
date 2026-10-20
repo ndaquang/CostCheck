@@ -1,6 +1,6 @@
 'use strict';
 /* TRAIN KHỚP — học từ các lần QS xác nhận nhóm đúng, đo tỉ lệ khớp trước / sau, xuất mô hình học (.dxgl) cho module Điền giá BOQ.
-   Dùng: node modules/de_xuat_gia/hoc/hoc.js [--db data/db.js] [--out <thư mục>]
+   Dùng: node modules/de_xuat_gia/hoc/hoc.js [--db data/db.js] [--them data/doithu.js[=Nhãn] ...] [--out <thư mục>]
            [--cap <cặp khớp.xlsx> ...]      file QS lập: cột Mô tả | Đơn vị | Tiêu đề hạng mục (không bắt buộc) | Nhóm đúng
            [--phien <phiên.dgbq> ...]       phiên làm việc đã lưu từ trang Điền giá BOQ (lấy các dòng QS đã chọn nhóm)
            [--mo-hinh <cũ.dxgl> ...]        dữ liệu học đã có (cộng dồn)
@@ -10,7 +10,8 @@
    Kết quả: hoc_khop.dxgl (nạp vào trang Điền giá BOQ: ô "Mở phiên / dữ liệu học"), BAO_CAO_HOC.xlsx, hoc.json */
 const { DXG, fs, path, arg, args, loadDB, readXlsx, writeXlsx, findHeader, pct } = require('./chung.js');
 
-const { db: DB, demo } = loadDB(arg('--db') && path.resolve(arg('--db')));
+const { db: DB, demo, nguon } = loadDB(arg('--db') && path.resolve(arg('--db')));
+for (const x of nguon) console.log(`Gộp nguồn ${x.label} (${x.file}): ${x.dong} dòng, ${x.nhomChung} nhóm trùng với CSDL, ${x.nhomMoi} nhóm mới`);
 const OUT = path.resolve(arg('--out') || path.join(__dirname, 'ket_qua_hoc'));
 const K = +(arg('--k') || 5);
 fs.mkdirSync(OUT, { recursive: true });
@@ -163,7 +164,7 @@ const FIT = { cao: 'Cao', tb: 'Trung bình', thap: 'Thấp', none: 'Không khớ
 const mrow = (label, m, note) => [label, m.top1, m.top3, m.fill, m.prec, m.dung, m.sai, note];
 const sheets = [
   { name: 'Tóm tắt', title: 'TRAIN KHỚP NHÓM — KẾT QUẢ',
-    note: `CSDL: ${demo ? 'GIẢ LẬP (bộ chạy thử)' : arg('--db')} · ${DB.count.toLocaleString('vi-VN')} dòng · ${IX.groups.length} nhóm\n` +
+    note: `CSDL: ${demo ? 'GIẢ LẬP (bộ chạy thử)' : arg('--db')}${nguon.length ? ' + ' + nguon.map(x => x.label).join(' + ') : ''} · ${DB.count.toLocaleString('vi-VN')} dòng · ${IX.groups.length} nhóm\n` +
       `Dữ liệu học: ${P.length} cặp mô tả → nhóm (${keys.length} cách ghi khác nhau)${bad.length ? `, ${bad.length} cặp không tìm thấy nhóm trong CSDL (xem sheet "Không có nhóm")` : ''} · từ đồng nghĩa người dùng: ${syn.length}\n` +
       `"Điền" = độ khớp ≥ Trung bình và cùng đơn vị (như mặc định của trang Điền giá). "Mô tả mới" = kiểm tra chéo ${K} phần, mô tả đem thử chưa từng có trong dữ liệu học.`,
     header: ['Trường hợp', 'Top-1 đúng', 'Top-3 có nhóm đúng', 'Tỉ lệ điền', 'Độ chính xác khi điền', 'Điền đúng / tổng', 'Điền SAI / tổng', 'Ghi chú'],

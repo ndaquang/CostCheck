@@ -7,6 +7,7 @@
    4. Đơn giá bổ sung → dòng trước đó không có tham khảo được điền theo giá bổ sung.
    5. Giá điền tay + lưu / khôi phục phiên.
    6. Dữ liệu học: lựa chọn nhóm của QS được lưu (.dxgl) và dùng lại khi khớp.
+   7. Nhiều nguồn giá: đơn giá đối thủ gộp vào CSDL của module (nhóm trùng tên chung phân bố), lọc theo nguồn.
    Dùng: node tests/e2e.js <thư mục tạm>   (cần playwright, python3 + openpyxl, LibreOffice) */
 const fs = require('fs'), path = require('path'), http = require('http');
 const { execFileSync } = require('child_process');
@@ -171,6 +172,27 @@ print(json.dumps([[ws.cell(r,4).value, ws.cell(r,5).value, ws.cell(r,7).value] f
   await page.waitForFunction(() => /dữ liệu học/.test(document.querySelector('#load-msg').textContent));
   const got = await page.evaluate(id => { const it = window.__DXG_STATE.items.find(x => x.id === id); const c = it.cands[it.sel]; return { g: c.g, learned: c.learned, fit: it.c.fit.level }; }, pickId);
   check(got.g === want && got.learned === 'exact' && got.fit === 'cao', `dòng ${pickId} khớp nhóm QS đã chọn, độ khớp ${got.fit}`);
+
+  console.log('7. Nhiều nguồn giá: CSDL nội bộ + đơn giá đối thủ');
+  const FX = require('./fixture_db.js');
+  fs.writeFileSync(path.join(SITE, 'data', 'db.js'), 'window.DB = ' + JSON.stringify(FX.makeDB()) + ';\nwindow.DT = ' + JSON.stringify(FX.makeDoiThu()) + ';');
+  await page.reload(); await page.waitForSelector('#splash', { state: 'detached' });
+  await page.waitForFunction(() => window.__DXG_STATE.sources.length === 2);
+  const meta = await page.textContent('#dxg-meta');
+  check(/đối thủ 171/.test(meta) && /CTG: không có/.test(meta), 'gộp nguồn đối thủ vào CSDL của module: ' + meta);
+  await run(path.join(WORK, 'BOQ_mau.xlsx'));
+  s = await state();
+  check(by('Xay dung|15').fill && by('Xay dung|15').price >= 3.1e8, 'VRV (chỉ nguồn đối thủ có) giờ có giá đề xuất: ' + by('Xay dung|15').price);
+  const src6 = await page.evaluate(() => window.__DXG_STATE.items.find(it => it.id === 'Xay dung|6').c.st.src);
+  check(src6['Nội bộ'] > 0 && src6['Đối thủ'] > 0, 'nhóm trùng tên: báo giá hai nguồn chung một phân bố ' + JSON.stringify(src6));
+  await page.click('#o-src summary');
+  await page.uncheck('#o-src input[value="Đối thủ"]');
+  s = await state();
+  check(!by('Xay dung|15').fill && /nguồn đang chọn/.test(by('Xay dung|15').why), 'bỏ chọn nguồn Đối thủ: VRV không còn giá — ' + by('Xay dung|15').why);
+  await page.check('#o-src input[value="Đối thủ"]');
+  await page.click('#o-src summary');
+  const f7 = await exportFile('lan7_DaDienGia.xlsx');
+  verify(path.join(WORK, 'BOQ_mau.xlsx'), f7);
 
   if (errs.length) { console.error('LỖI TRANG:', errs); fails++; }
   await browser.close(); srv.close();

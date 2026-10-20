@@ -33,7 +33,8 @@
 </header>
 
 <main class="wrap">
-  <p class="intro">Lấy <b>giá tốt nhất</b> từ CSDL đơn giá và <b>điền thẳng vào cột Đơn giá của file BOQ</b>. Phần mềm không thêm sheet hay cột nào, chỉ ghi số vào các ô đơn giá đang trống; định dạng ô, công thức Thành tiền và mọi thứ khác giữ nguyên. Dòng khớp chưa đủ tin cậy được để trống cho QS định giá. Nạp thêm đơn giá bổ sung để kết quả chính xác hơn.</p>
+  <p class="intro">Lấy <b>giá tốt nhất</b> từ mọi nguồn giá có trong gói dữ liệu (CSDL nội bộ, đơn giá đối thủ, CTG nếu có) cùng đơn giá bổ sung, rồi ghi vào file BOQ. Mặc định giá nằm ở <b>một cột riêng "ĐƠN GIÁ ĐỀ XUẤT (CSDL)" tô màu</b> sau bảng; cột Đơn giá, công thức Thành tiền và mọi định dạng khác giữ nguyên. Dòng khớp chưa đủ tin cậy được để trống cho QS định giá.</p>
+  <p class="intro small" id="dxg-src"></p>
 
   <!-- Bước 1: nạp file -->
   <section class="card" id="step-load">
@@ -91,6 +92,7 @@
       <div class="opt"><label for="o-yto">đến</label><input id="o-yto" type="number" min="2000" max="2100" placeholder="tất cả"></div>
       <div class="opt"><label>Loại hình dự án</label><details class="msel" id="o-type"><summary>Tất cả</summary><div class="msel-list"></div></details></div>
       <div class="opt"><label>Tỉnh/TP</label><details class="msel" id="o-prov"><summary>Tất cả</summary><div class="msel-list"></div></details></div>
+      <div class="opt"><label>Nguồn giá</label><details class="msel" id="o-src"><summary>Tất cả</summary><div class="msel-list"></div></details></div>
       <div class="opt"><label for="o-tol">Ngưỡng lệch baseline</label><input id="o-tol" type="number" value="10" step="1"><span class="unit">%</span></div>
       <div class="opt chk"><label><input type="checkbox" id="o-review" checked> Bỏ dòng REVIEW</label><label><input type="checkbox" id="o-outlier" checked> Bỏ giá ngoại lai</label><label><input type="checkbox" id="o-warn"> Bỏ dòng có cảnh báo</label><label title="Chỉ dùng khi ghi vào ô Đơn giá"><input type="checkbox" id="o-overwrite"> Ghi đè ô đã có giá</label><label title="Chỉ dùng khi ghi vào ô Đơn giá"><input type="checkbox" id="o-amount" checked> Ô Thành tiền trống: điền = KL × Đơn giá</label></div>
     </div>

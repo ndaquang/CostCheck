@@ -40,9 +40,10 @@
     wb: null, fileName: '', sheets: [], lines: [], items: [],
     baseList: null, baseName: '', extra: [], session: null,
     learn: { cap: [], dong_nghia: [] }, learnInfo: null,   // dữ liệu học (.dxgl) đã nạp
+    sources: [],   // nguồn giá ngoài CSDL nội bộ đã thử nạp: [{ label, status: 'ok' | 'none' | 'format', dong, nhomChung, nhomMoi }]
     // mode: 'col' = ghi giá đề xuất vào CỘT RIÊNG tô màu (mặc định, không đụng cột Đơn giá); 'rate' = điền vào ô Đơn giá đang trống
     opt: { mode: 'col', pick: 'p25', minFit: 'tb', round: 'auto', overwrite: false, amount: true, yearFrom: null, yearTo: null, types: new Set(), provs: new Set(),
-      excludeReview: true, excludeOutlier: true, excludeWarn: false, factor: 1, tolBl: 0.10, tolOk: 0.05, tolBt: 0.15 },
+      excludeReview: true, excludeOutlier: true, excludeWarn: false, srcOff: new Set(), factor: 1, tolBl: 0.10, tolOk: 0.05, tolBt: 0.15 },
     view: { f: 'all', q: '', shown: PAGE, tab: 'lines', cur: null },
   };
 
@@ -105,6 +106,49 @@
     s.onerror = () => fail('Không tìm thấy data/db.js (chế độ chạy thử không qua cổng đăng nhập).');
     document.body.appendChild(s);
   }
+  /* ---------- Nguồn giá ngoài CSDL nội bộ ---------- */
+  // Các khối dữ liệu cùng định dạng window.DB trong gói .dgbw, gộp vào CSDL của module để có thêm báo giá cho mỗi nhóm
+  // công việc. Chỉ admin; nhân viên không có khóa mở các khối này. Chạy thử không qua đăng nhập: dùng window.DT / window.CTG
+  // nếu trang đã nạp sẵn (vd data/db.js gán thêm biến window.DT).
+  const NGUON = [{ kind: 'doithu', label: 'Đối thủ', glob: 'DT' }, { kind: 'ctg', label: 'CTG', glob: 'CTG' }];
+  async function readSource(n) {
+    if (window.SECURE) return JSON.parse(await window.SECURE.load(n.kind));
+    if (!window[n.glob]) throw new Error('không có');
+    return window[n.glob];
+  }
+  async function loadSources() {
+    if (!ADMIN) return;
+    for (const n of NGUON) {
+      let src;
+      try { src = await readSource(n); } catch (e) { S.sources.push({ label: n.label, status: 'none' }); continue; }
+      if (!src || !src.cols || !Array.isArray(src.cols.name) || !src.count) { S.sources.push({ label: n.label, status: 'format' }); continue; }
+      S.sources.push({ label: n.label, status: 'ok', ...DXG.mergeDB(ownDB(), src, n.label) });
+    }
+    if (S.sources.some(x => x.status === 'ok')) {
+      const sess = S.items.length ? sessionData() : null;
+      rebuildIndex(); buildSourceOptions();
+      if (sess) rematch(sess);
+    } else showMeta();
+    console.info('Nguồn giá:', S.sources.map(x => `${x.label} ${x.status}${x.dong ? ` (${x.dong} dòng)` : ''}`).join(', '));
+  }
+  function showMeta() {
+    const meta = $('#dxg-meta'), srcEl = $('#dxg-src');
+    const C = DBX.cols, D = DBX.dicts || {}, cnt = {};
+    if (Array.isArray(C.ns)) for (let i = 0; i < DBX.count; i++) { const l = D.ns[C.ns[i]]; cnt[l] = (cnt[l] || 0) + 1; }
+    const parts = Object.entries(cnt).map(([l, n]) => `${l.toLowerCase()} ${NF.format(n)}`);
+    const miss = S.sources.filter(x => x.status !== 'ok').map(x => `${x.label}: ${x.status === 'none' ? 'không có trong gói dữ liệu' : 'định dạng khác, chưa dùng được'}`);
+    if (meta) meta.textContent = `${NF.format(DBX.count)} đơn giá${parts.length > 1 ? ` (${parts.join(' · ')})` : S.extra.length ? ` (gồm ${NF.format(S.extra.length)} bổ sung)` : ''} · ${NF.format(IX.groups.length)} nhóm công việc · giá quy về ${DBX.baseYear || 2026} · cập nhật ${DBX.built || ''}${miss.length ? ' · ' + miss.join(' · ') : ''}`;
+    // trong nội dung module (thấy được cả khi ghép vào app tra cứu)
+    const lech = S.sources.filter(x => x.lechNam).map(x => x.label);
+    if (srcEl) srcEl.textContent = `Nguồn giá đang dùng: ${parts.length ? parts.join(' · ') : `nội bộ ${NF.format(DBX.count)}`} báo giá · ${NF.format(IX.groups.length)} nhóm công việc${miss.length ? ' · ' + miss.join(' · ') : ''}`
+      + (lech.length ? ` · Lưu ý: ${lech.join(', ')} quy giá về năm gốc khác CSDL nội bộ` : '');
+  }
+  // Nguồn có báo giá trong phân bố: số báo giá theo nguồn của một thống kê nhóm (chỉ hiện khi CSDL có từ 2 nguồn)
+  const srcTxt = st => {
+    const D = DBX.dicts || {};
+    if (!st || !st.src || !D.ns || D.ns.length < 2) return '';
+    return ' (' + Object.entries(st.src).map(([l, n]) => `${l.toLowerCase()} ${n}`).join(', ') + ')';
+  };
   function rebuildIndex() {
     if (!DBX) DBX = window.DB;
     DXG.setSynonyms(S.learn.dong_nghia);
@@ -114,8 +158,7 @@
     const bs = S.extra.length ? (DBX.projects || []).findIndex(p => p[0] === 'BOSUNG') : -1;
     if (bs >= 0) for (const g of IX.groups) if (g.rows.every(i => IX.C.p[i] === bs)) g.boost = 1.08;
     statCache = new Map();
-    const meta = $('#dxg-meta');
-    if (meta) meta.textContent = `${NF.format(DBX.count)} đơn giá${S.extra.length ? ` (gồm ${NF.format(S.extra.length)} bổ sung)` : ''} · ${NF.format(IX.groups.length)} nhóm công việc · giá quy về ${DBX.baseYear || 2026} · cập nhật ${DBX.built || ''}`;
+    showMeta();
   }
   function init() {
     const t0 = performance.now();
@@ -125,6 +168,7 @@
     if ($('#splash')) $('#splash').remove();
     if (!window.writeWorkbook) $('#dx-report').hidden = true;   // báo cáo Excel dùng bộ ghi xlsx của app tra cứu
     console.log(`Chỉ mục điền giá: ${Math.round(performance.now() - t0)} ms, ${IX.groups.length} nhóm`);
+    loadSources();
   }
 
   /* ---------- Tùy chọn ---------- */
@@ -143,6 +187,23 @@
     };
     fill('o-type', P.map(p => p[2]), S.opt.types);
     fill('o-prov', P.map(p => p[4] || p[3]), S.opt.provs);
+    buildSourceOptions();
+  }
+  // "Nguồn giá": mặc định dùng mọi nguồn; bỏ chọn nguồn nào thì báo giá của nguồn đó không vào phân bố giá
+  function buildSourceOptions() {
+    const D = (DBX && DBX.dicts) || {}, labels = D.ns && D.ns.length ? D.ns : ['Nội bộ'], box = $('#o-src .msel-list');
+    if (!box) return;
+    box.innerHTML = labels.map(l => `<label><input type="checkbox" value="${esc(l)}"${S.opt.srcOff.has(l) ? '' : ' checked'}> ${esc(l)}</label>`).join('');
+    const sum = () => { const on = labels.filter(l => !S.opt.srcOff.has(l)); $('#o-src summary').textContent = on.length === labels.length ? 'Tất cả' : on.join(', ') || '(không nguồn nào)'; };
+    box.onchange = () => { S.opt.srcOff.clear(); $$('input', box).forEach(i => { if (!i.checked) S.opt.srcOff.add(i.value); }); sum(); recompute(); };
+    sum();
+    // CSDL dựng lại (thêm nguồn) cũng phải dựng lại danh sách tỉnh / loại hình theo dự án mới
+    const P = (DBX && DBX.projects) || [];
+    for (const [id, vals, set] of [['o-type', P.map(p => p[2]), S.opt.types], ['o-prov', P.map(p => p[4] || p[3]), S.opt.provs]]) {
+      const lb = $(`#${id} .msel-list`); if (!lb) continue;
+      const list = [...new Set(vals.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi'));
+      if (list.length) lb.innerHTML = list.map(v => `<label><input type="checkbox" value="${esc(v)}"${set.has(v) ? ' checked' : ''}> ${esc(v)}</label>`).join('');
+    }
   }
   function readOptions() {
     const o = S.opt, n = id => { const v = $(id).value.trim(); return v === '' ? null : +v; };
@@ -161,6 +222,7 @@
     $('#o-yfrom').value = o.yearFrom ?? ''; $('#o-yto').value = o.yearTo ?? '';
     $('#o-factor').value = Math.round(o.factor * 1000) / 10; $('#o-tol').value = Math.round(o.tolBl * 1000) / 10;
     $('#o-review').checked = o.excludeReview; $('#o-outlier').checked = o.excludeOutlier; $('#o-warn').checked = o.excludeWarn;
+    buildSourceOptions();
     for (const [id, set] of [['o-type', o.types], ['o-prov', o.provs]]) {
       $$(`#${id} input`).forEach(i => { i.checked = set.has(i.value); });
       $(`#${id} summary`).textContent = set.size ? [...set].join(', ') : 'Tất cả';
@@ -251,12 +313,13 @@
     if (pi < 0) { DB.projects.push(['BOSUNG', 'Đơn giá bổ sung', '', '', '', '']); pi = DB.projects.length - 1; }
     const uIdx = (dict, v) => { if (!D[dict]) D[dict] = []; let k = D[dict].indexOf(v); if (k < 0) { D[dict].push(v); k = D[dict].length - 1; } return k; };
     const N = DB.count, year = DB.baseYear || new Date().getFullYear();
+    const ns = DXG.tagSource(DB, 'Bổ sung');
     const keys = Object.keys(C).filter(k => Array.isArray(C[k]));
     for (const it of list) {
       // mô tả ngắn ("Móng") trong file bổ sung: ghép tiêu đề gần nhất để thành tên đầy đủ
       const name = it.desc.length < 25 && it.ctx ? `${it.ctx} — ${it.desc}` : it.desc;
       const row = { name, spec: '', u: uIdx('u', it.unit), cu: uIdx('cu', it.unit), g: -1, gn: -1, p26: it.price, cp: it.price, tot: it.price, y: year, p: pi,
-        st: -1, ol: -1, warn: -1, mat: null, lab: null, mac: null };
+        st: -1, ol: -1, warn: -1, mat: null, lab: null, mac: null, ns };
       for (const k of keys) C[k].push(k in row ? row[k] : (typeof C[k][0] === 'number' ? -1 : null));
       S.extra.push({ ...it, file: fileName });
     }
@@ -270,7 +333,7 @@
       if (!['DGBQ1', 'DGBQ2', 'DGBQ3'].includes(j.dinh_dang)) throw new Error('Không phải file phiên làm việc hay dữ liệu học.');
       S.session = j;
       $('#n-sess').textContent = file.name;
-      if (j.opt) { Object.assign(S.opt, j.opt, { types: new Set(j.opt.types || []), provs: new Set(j.opt.provs || []) }); writeOptions(); }
+      if (j.opt) { Object.assign(S.opt, j.opt, { types: new Set(j.opt.types || []), provs: new Set(j.opt.provs || []), srcOff: new Set(j.opt.srcOff || []) }); writeOptions(); }
       if (j.baseList && !S.baseList) { S.baseList = j.baseList; S.baseName = j.baseName || 'phiên đã lưu'; $('#n-base').textContent = `${S.baseName} · ${NF.format(j.baseList.length)} giá`; }
       if (j.extra && j.extra.length && !S.extra.length) { addExtraRows(j.extra, 'phiên đã lưu'); $('#n-extra').textContent = `${NF.format(S.extra.length)} đơn giá bổ sung`; }
       if (S.items.length) { rematch(j); msg('Đã khôi phục phiên làm việc.', 'ok'); }
@@ -424,7 +487,7 @@
   let statCache = new Map(), statKey = '';
   function stats(gid, ratio) {
     const o = S.opt;
-    const fk = [o.yearFrom, o.yearTo, [...o.types].join(','), [...o.provs].join(','), o.excludeReview, o.excludeOutlier, o.excludeWarn, IX.groups.length].join('|');
+    const fk = [o.yearFrom, o.yearTo, [...o.types].join(','), [...o.provs].join(','), [...o.srcOff].join(','), o.excludeReview, o.excludeOutlier, o.excludeWarn, IX.groups.length].join('|');
     if (fk !== statKey) { statCache = new Map(); statKey = fk; }
     const k = gid + '|' + ratio;
     if (!statCache.has(k)) statCache.set(k, DXG.groupStats(IX, gid, o, ratio));
@@ -442,7 +505,7 @@
     const o = S.opt, f = o.factor, c = it.sel >= 0 ? it.cands[it.sel] : null;
     const st = c ? stats(c.g, c.ratio) : null;
     const fit = c ? (c.picked ? { level: 'cao', value: 1, picked: true } : DXG.confidence(c, st)) : { level: 'none', value: 0 };
-    const shown = !!(c && st && (fit.level !== 'none' || c.picked));
+    const shown = !!(c && st && st.n > 0 && (fit.level !== 'none' || c.picked));
     const ref = shown ? { p10: st.p10 * f, p25: st.p25 * f, p50: st.med * f, p75: st.p75 * f, p90: st.p90 * f } : null;
     // ---- Giá điền và có điền hay không
     const best = shown ? roundPrice(PICK[o.pick].f(st) * f) : null;
@@ -454,7 +517,7 @@
     else if (!col && it.rateFormula) why = 'Ô đơn giá là công thức — giữ nguyên';
     else if (!col && isNum(it.qs) && !o.overwrite) { why = 'Ô đã có giá — giữ nguyên'; price = it.qs; }
     else if (isNum(it.manual)) { price = it.manual; fill = true; why = 'Giá nhập tay'; }
-    else if (!shown) why = 'Không có tham khảo trong CSDL — QS tự định giá';
+    else if (!shown) why = c && st && st.n === 0 ? 'Nhóm khớp không có báo giá thuộc nguồn đang chọn' : 'Không có tham khảo trong CSDL — QS tự định giá';
     else if (c.unitOk === false) why = `Khác đơn vị (CSDL: ${IX.groups[c.g].unit}) — không điền`;
     else if (FIT_RANK[fit.level] < FIT_RANK[o.minFit]) { why = `Khớp ${FIT[fit.level].toLowerCase()} — không điền, QS kiểm tra`; }
     else if (!isNum(best) || best <= 0) why = 'Không tính được giá';
@@ -557,7 +620,7 @@
       <td>${esc(l.unit)}</td>
       <td class="num">${fmtQ(l.qty)}</td>
       <td class="grp">${g ? esc(g.name) : c.cand ? `<span class="muted">gợi ý yếu: ${esc(IX.groups[c.cand.g].name)}</span>` : '<span class="muted">—</span>'} ${fitBadge(l)}
-        ${g ? `<div class="price-sub">${c.st.n} báo giá · ${c.st.proj} dự án · gần nhất ${c.st.latest || '?'}</div>` : ''}${c.notes.length ? `<div class="price-sub warn">${esc(c.notes.join(' · '))}</div>` : ''}</td>
+        ${g ? `<div class="price-sub">${c.st.n} báo giá${esc(srcTxt(c.st))} · ${c.st.proj} dự án · gần nhất ${c.st.latest || '?'}</div>` : ''}${c.notes.length ? `<div class="price-sub warn">${esc(c.notes.join(' · '))}</div>` : ''}</td>
       <td class="num small">${c.ref ? `${fmt(c.ref.p25)} – ${fmt(c.ref.p75)}<div class="price-sub">P50 ${fmt(c.ref.p50)}</div>` : ''}</td>
       <td class="num"><b>${fmt(c.price)}</b>${evTxt}</td>
       <td>${stBadge(l)}<div class="price-sub">${esc(c.why)}</div></td>
@@ -603,7 +666,7 @@
     return `<div class="cand${it.sel === k ? ' on' : ''}" data-k="${k}">
       <input type="radio" name="cand"${it.sel === k ? ' checked' : ''}>
       <div><div class="nm">${esc(g.name)}${g.boost ? ' <span class="badge b-tb">bổ sung</span>' : ''}</div>
-        <div class="small muted">ĐV ${esc(g.unit || '?')}${conv}${c.unitOk === false ? ' · <b class="d-hi">khác đơn vị</b>' : ''} · ${st.n} báo giá · ${st.proj} dự án · gần nhất ${st.latest || '?'}${st.relaxed ? ' · đã nới bộ lọc' : ''}</div></div>
+        <div class="small muted">ĐV ${esc(g.unit || '?')}${conv}${c.unitOk === false ? ' · <b class="d-hi">khác đơn vị</b>' : ''} · ${st.n} báo giá${esc(srcTxt(st))} · ${st.proj} dự án · gần nhất ${st.latest || '?'}${st.relaxed ? ' · đã nới bộ lọc' : ''}</div></div>
       <div class="num"><b>${fmt(roundPrice(PICK[S.opt.pick].f(st) * f))}</b><div class="price-sub">P25–P75 ${fmt(st.p25 * f)} – ${fmt(st.p75 * f)}</div><div class="price-sub">${c.picked ? 'QS chọn' : c.learned ? 'đã học · ' + Math.round(c.score * 100) + '%' : 'phù hợp ' + Math.round(c.score * 100) + '%'}</div></div></div>`;
   }
   function renderDrawer(it) {
@@ -669,7 +732,7 @@
     const res = DXG.match(IX, { desc: q, unit: it.unit, ctx: '' }, { limit: 12 });
     $('#dw-sr').innerHTML = res.length ? res.map(r => {
       const g = IX.groups[r.g], st = stats(r.g, r.ratio), f = S.opt.factor;
-      return `<div class="cand" data-g="${r.g}"><span>＋</span><div><div class="nm">${esc(g.name)}</div><div class="small muted">ĐV ${esc(g.unit)}${r.unitOk === false ? ' · <b class="d-hi">khác đơn vị</b>' : ''} · ${st.n} báo giá · ${st.proj} dự án</div></div><div class="num"><b>${fmt(roundPrice(PICK[S.opt.pick].f(st) * f))}</b><div class="price-sub">P25–P75 ${fmt(st.p25 * f)} – ${fmt(st.p75 * f)}</div></div></div>`;
+      return `<div class="cand" data-g="${r.g}"><span>＋</span><div><div class="nm">${esc(g.name)}</div><div class="small muted">ĐV ${esc(g.unit)}${r.unitOk === false ? ' · <b class="d-hi">khác đơn vị</b>' : ''} · ${st.n} báo giá${esc(srcTxt(st))} · ${st.proj} dự án</div></div><div class="num"><b>${fmt(roundPrice(PICK[S.opt.pick].f(st) * f))}</b><div class="price-sub">P25–P75 ${fmt(st.p25 * f)} – ${fmt(st.p75 * f)}</div></div></div>`;
     }).join('') : '<div class="muted small">Không tìm thấy nhóm nào.</div>';
   }
   function refreshItem(it) {
@@ -794,15 +857,15 @@
       ['Dòng hạng mục', t.n], ['Sẽ điền / đã điền', t.fill], ['Giữ giá có sẵn', t.keep], ['Để trống — QS định giá', t.none],
       ['Tổng giá trị sau khi điền', Math.round(t.amt)], ['  trong đó phần điền mới', Math.round(t.amtFill)],
       ['CSDL', `${NF.format(DBX.count)} đơn giá · giá quy về ${DBX.baseYear || 2026} · cập nhật ${DBX.built || ''}`], ['Lập lúc', new Date().toLocaleString('vi-VN', { hour12: false })]];
-    const det = [['Sheet', 'Dòng', 'Mã', 'Mô tả', 'Tiêu đề gần nhất', 'ĐV', 'KL', 'Nhóm tham khảo CSDL', 'Độ phù hợp', 'Số BG', 'P10', 'P25', 'P50', 'P75', 'P90', col ? 'Giá đề xuất' : 'Đơn giá', 'Thành tiền', 'Trạng thái', 'Lý do', 'Ghi chú', 'Giá có sẵn trong BOQ']];
+    const det = [['Sheet', 'Dòng', 'Mã', 'Mô tả', 'Tiêu đề gần nhất', 'ĐV', 'KL', 'Nhóm tham khảo CSDL', 'Độ phù hợp', 'Số BG', 'P10', 'P25', 'P50', 'P75', 'P90', col ? 'Giá đề xuất' : 'Đơn giá', 'Thành tiền', 'Trạng thái', 'Lý do', 'Ghi chú', 'Giá có sẵn trong BOQ', 'Nguồn báo giá']];
     for (const it of S.items) {
       const c = it.c, g = c.shown ? IX.groups[c.cand.g] : null, R = c.ref;
       det.push([it.sheet, it.r + 1, it.code, it.desc, it.heads[it.heads.length - 1] || '', it.unit, it.qty, g ? g.name : '', c.cand ? FIT_T[c.fit.level] : '', g ? c.st.n : null,
-        ...(R ? [R.p10, R.p25, R.p50, R.p75, R.p90].map(Math.round) : [null, null, null, null, null]), c.price, isNum(c.amt) ? Math.round(c.amt) : null, st(c), c.why, it.note, c.qs]);
+        ...(R ? [R.p10, R.p25, R.p50, R.p75, R.p90].map(Math.round) : [null, null, null, null, null]), c.price, isNum(c.amt) ? Math.round(c.amt) : null, st(c), c.why, it.note, c.qs, g ? Object.entries(c.st.src || {}).map(([l, n]) => `${l} ${n}`).join(', ') : '']);
     }
     const blob = window.writeWorkbook([
       { name: 'Tóm tắt', rows: sum, widths: [32, 70], nums: new Set([1]) },
-      { name: 'Chi tiết', rows: det, widths: [14, 6, 6, 48, 30, 7, 10, 38, 11, 7, 11, 11, 11, 11, 11, 12, 15, 20, 38, 30, 14], nums: new Set([10, 11, 12, 13, 14, 15, 16, 20]) },
+      { name: 'Chi tiết', rows: det, widths: [14, 6, 6, 48, 30, 7, 10, 38, 11, 7, 11, 11, 11, 11, 11, 12, 15, 20, 38, 30, 14, 26], nums: new Set([10, 11, 12, 13, 14, 15, 16, 20]) },
     ]);
     download(blob, S.fileName.replace(/\.(xlsx|xlsm)$/i, '') + '_BaoCaoDienGia.xlsx');
   }
@@ -816,7 +879,7 @@
     const o = S.opt;
     return {
       dinh_dang: 'DGBQ3', file: S.fileName, at: new Date().toISOString(),
-      opt: { ...o, types: [...o.types], provs: [...o.provs] }, baseName: S.baseName, baseList: S.baseList,
+      opt: { ...o, types: [...o.types], provs: [...o.provs], srcOff: [...o.srcOff] }, baseName: S.baseName, baseList: S.baseList,
       extra: S.extra.map(({ code, desc, ctx, unit, price, sheet }) => ({ code, desc, ctx, unit, price, sheet })),
       items: S.items.filter(it => (it.cands[it.sel] && it.cands[it.sel].picked) || (it.sel < 0 && it.cands.length) || isNum(it.manual) || isNum(it.baseManual) || it.skip || it.note)
         .map(it => ({ id: it.id, gkey: it.sel >= 0 ? IX.groups[it.cands[it.sel].g].key : null, picked: !!(it.cands[it.sel] && it.cands[it.sel].picked), manual: it.manual, baseManual: it.baseManual, skip: it.skip, note: it.note,

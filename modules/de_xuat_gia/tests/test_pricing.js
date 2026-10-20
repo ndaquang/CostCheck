@@ -167,4 +167,35 @@ t('học từ lựa chọn QS: nhớ đúng, gần đúng, nhóm bị bác', () 
   // tắt học
   assert.strictEqual(DXG.match(IX2, { desc: 'Bê tông móng M300', unit: 'm3' }, { learn: false })[0].g, top0.g);
 });
+t('gộp nguồn giá: nhóm trùng tên gộp chung, nhóm mới thêm, lọc theo nguồn', () => {
+  const dst = makeDB(), src = makeDB();
+  // nguồn thứ hai: giá cao hơn 10%, thêm một nhóm chỉ nguồn này có, dự án riêng
+  src.cols.p26 = src.cols.p26.map(v => Math.round(v * 1.1)); src.projects = [['DT1', 'Đối thủ 1', 'Nhà xưởng', 'Long An', 'Tây Ninh', '']];
+  src.cols.p = src.cols.p.map(() => 0);
+  const k = src.dicts.g.push('Hệ thống điều hòa VRV') - 1; src.dicts.gn.push('Hệ thống điều hòa VRV'); const ub = src.dicts.u.push('bộ') - 1; src.dicts.cu.push('bộ');
+  for (const key of Object.keys(src.cols)) src.cols[key].push(src.cols[key][0]);
+  const last = src.count; src.count++;
+  Object.assign(src.cols, { name: src.cols.name.map((x, i) => i === last ? 'Hệ thống điều hòa VRV' : x) });
+  src.cols.g[last] = k; src.cols.gn[last] = src.dicts.gn.length - 1; src.cols.u[last] = ub; src.cols.cu[last] = src.dicts.cu.length - 1; src.cols.p26[last] = 3.2e8;
+  const n0 = dst.count, nGroups0 = DXG.buildIndex(dst).groups.length;
+  const r = DXG.mergeDB(dst, src, 'Đối thủ');
+  assert.strictEqual(dst.count, n0 + src.count);
+  for (const a of Object.values(dst.cols)) assert.strictEqual(a.length, dst.count);
+  assert.strictEqual(r.nhomMoi, 1); assert.strictEqual(r.nhomChung, 12);
+  assert.deepStrictEqual(dst.dicts.ns, ['Nội bộ', 'Đối thủ']);
+  const IX2 = DXG.buildIndex(dst);
+  assert.strictEqual(IX2.groups.length, nGroups0 + 1);
+  const gid = DXG.match(IX2, { desc: 'Đào đất móng bằng máy', unit: 'm3' })[0].g;
+  const all = DXG.groupStats(IX2, gid, {}), own = DXG.groupStats(IX2, gid, { srcOff: new Set(['Đối thủ']) });
+  assert.deepStrictEqual(all.src, { 'Nội bộ': 14, 'Đối thủ': 14 });
+  assert.strictEqual(own.n, 14); assert.deepStrictEqual(own.src, { 'Nội bộ': 14 });
+  assert.ok(all.med > own.med);
+  // dự án nguồn mới: lọc tỉnh vẫn đúng
+  assert.ok(DXG.groupStats(IX2, gid, { provs: new Set(['Tây Ninh']) }).ids.every(i => IX2.C.ns[i] === 1));
+  // nhóm chỉ có ở nguồn đã tắt: không nới bộ lọc sang nguồn đó
+  const vrv = DXG.match(IX2, { desc: 'Hệ thống điều hòa VRV', unit: 'bộ' })[0];
+  assert.strictEqual(IX2.groups[vrv.g].name, 'Hệ thống điều hòa VRV');
+  assert.strictEqual(DXG.groupStats(IX2, vrv.g, {}).med, 3.2e8);
+  assert.strictEqual(DXG.groupStats(IX2, vrv.g, { srcOff: new Set(['Đối thủ']), yearFrom: 2030 }).n, 0);
+});
 console.log(`\n${n} nhóm kiểm thử đạt.`);

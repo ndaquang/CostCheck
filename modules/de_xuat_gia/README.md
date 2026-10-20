@@ -1,6 +1,6 @@
 # Module Điền giá BOQ
 
-Module lấy **giá tốt nhất** từ CSDL đơn giá (gói `.dgbw`, dùng chung với app Tra cứu) và ghi vào file BOQ. Mặc định giá nằm ở **một cột riêng "ĐƠN GIÁ ĐỀ XUẤT (CSDL)" được tô màu**, tách khỏi giá QS trong cột Đơn giá.
+Module lấy **giá tốt nhất** từ mọi nguồn giá trong gói dữ liệu `.dgbw` (CSDL nội bộ dùng chung với app Tra cứu, đơn giá đối thủ, CTG nếu có) cùng đơn giá bổ sung, rồi ghi vào file BOQ. Mặc định giá nằm ở **một cột riêng "ĐƠN GIÁ ĐỀ XUẤT (CSDL)" được tô màu**, tách khỏi giá QS trong cột Đơn giá.
 
 ## Vị trí trong phần mềm
 Module là mục **"Điền giá BOQ"** trên thanh điều hướng của app Tra cứu đơn giá, cạnh Tra cứu / Điểm rơi giá / Phân tích. **Chỉ tài khoản admin thấy mục này.** Module dùng chung lần đăng nhập và CSDL đã nạp của app, không cần đăng nhập lại.
@@ -40,6 +40,25 @@ Cả hai cách đều giữ nguyên style ô, ô gộp, độ rộng các cột 
 
 `styles.xml` chỉ được thêm style mới. Mọi phần khác giống hệt từng byte.
 
+## Nguồn giá
+
+Giá đề xuất lấy từ mọi nguồn dưới đây, gộp chung vào phân bố giá của từng nhóm công việc:
+
+| Nguồn | Lấy từ | Ghi chú |
+|---|---|---|
+| Nội bộ | khối `db` của gói `.dgbw` (dùng chung với app Tra cứu) | nguồn chính |
+| Đối thủ | khối `doithu` của gói `.dgbw` (cùng dữ liệu mục "Đối thủ" của app) | chỉ khóa admin mở được |
+| CTG | khối `ctg` của gói `.dgbw`, nếu có | cần cùng định dạng CSDL (xem lưu ý dưới) |
+| Bổ sung | file Excel nạp bằng **Nhập Excel đơn giá…** | ưu tiên nhẹ khi khớp |
+
+- Khi mở mục Điền giá BOQ, module tự mở các khối `doithu`, `ctg` bằng khóa của tài khoản đang đăng nhập. Khối nào không có trong gói (hoặc tài khoản không có quyền) thì bỏ qua và ghi rõ ở dòng **"Nguồn giá đang dùng"** ngay đầu module. Ví dụ: "nội bộ 12.345 · đối thủ 3.456 báo giá · CTG: không có trong gói dữ liệu".
+- Nhóm đại diện của nguồn khác **trùng tên + đơn vị** với nhóm nội bộ được gộp chung: báo giá hai nguồn vào cùng một phân bố, P25 tính trên tất cả. Nhóm chỉ nguồn khác có thì thêm thành nhóm mới. Nhờ vậy dòng BOQ mà CSDL nội bộ chưa có vẫn có giá.
+- Tùy chọn **"Nguồn giá"** (bước 3) bỏ chọn được từng nguồn. Báo giá của nguồn bị bỏ chọn không vào phân bố, kể cả khi phần mềm phải nới các bộ lọc khác.
+- Ngăn chi tiết, báo cáo Excel (cột "Nguồn báo giá") ghi số báo giá theo từng nguồn, vd "12 báo giá (nội bộ 9, đối thủ 3)".
+- Gộp diễn ra trong bộ nhớ của module. CSDL của app Tra cứu và gói `.dgbw` không bị sửa.
+- Mỗi khối phải cùng định dạng `window.DB` của app (cols, dicts, projects), với giá đã quy về cùng năm gốc. Khối có năm gốc khác được ghi lưu ý; khối khác định dạng được báo "định dạng khác, chưa dùng được".
+- Công cụ `hoc/` và `demo/chay_file.js` nhận `--them data/doithu.js` (lặp được, có thể kèm `=Nhãn`) để train, soát dữ liệu và chạy thử trên cùng các nguồn với trang web. `lam_sach.js --sua` không dùng cùng `--them`, để bản CSDL sửa không trộn nguồn khác vào.
+
 ## Chọn giá "tốt nhất"
 | Tùy chọn | Ý nghĩa |
 |---|---|
@@ -48,7 +67,7 @@ Cả hai cách đều giữ nguyên style ô, ô gộp, độ rộng các cột 
 | Trung vị (P50) | mức phổ biến của thị trường |
 | Năm gần nhất | trung vị các báo giá của năm mới nhất |
 
-- "Báo giá đáng tin" là báo giá còn lại sau các bộ lọc: bỏ giá ngoại lai, bỏ dòng REVIEW, và lọc theo năm, loại hình, tỉnh/TP nếu có chọn. Có hệ số điều chỉnh (%) và tùy chọn làm tròn.
+- "Báo giá đáng tin" là báo giá còn lại sau các bộ lọc: bỏ giá ngoại lai, bỏ dòng REVIEW, và lọc theo nguồn, năm, loại hình, tỉnh/TP nếu có chọn. Có hệ số điều chỉnh (%) và tùy chọn làm tròn.
 - **Chỉ điền khi đủ tin cậy:** nhóm tham khảo khớp từ mức "Trung bình" trở lên (chỉnh được) và cùng đơn vị (hoặc quy đổi được, vd kg ↔ tấn). Dòng không đạt được để trống, kèm lý do, để QS định giá.
 - Dòng được điền với độ khớp Trung bình có ghi chú "nên kiểm tra".
 - QS có thể chọn nhóm khác hoặc nhập giá tay cho từng dòng trong ngăn chi tiết.
@@ -159,8 +178,9 @@ node modules/de_xuat_gia/tests/test_pricing.js          # lõi: khớp, đơn v�
 node modules/de_xuat_gia/tests/test_hoc.js <thư mục tạm> # làm sạch CSDL (dữ liệu bẩn giả lập) + train khớp (cặp Excel, phiên, mô hình cũ)
 node modules/de_xuat_gia/tests/e2e.js <thư mục tạm>      # Chromium + LibreOffice: cột giá đề xuất riêng tô màu (cột Đơn giá không đổi,
                                                          # nạp lại file đã xuất), điền vào ô trống + Thành tiền/Tổng tính lại,
-                                                         # giữ giá QS có sẵn, đơn giá bổ sung, phiên, dữ liệu học
-node modules/de_xuat_gia/tests/e2e_gate.js <thư mục tạm> # app đã dựng (docs/): mục Điền giá BOQ trong app, CSP + đăng nhập, admin / nhân viên
+                                                         # giữ giá QS có sẵn, đơn giá bổ sung, phiên, dữ liệu học, gộp nguồn đối thủ
+node modules/de_xuat_gia/tests/e2e_gate.js <thư mục tạm> # app đã dựng (docs/): mục Điền giá BOQ trong app, CSP + đăng nhập, admin / nhân viên,
+                                                         # khối doithu (khóa admin) trong gói .dgbw được gộp vào nguồn giá
 python modules/de_xuat_gia/tests/verify_fill.py <BOQ gốc> <file đã điền>  # chỉ các ô trống được điền, mọi thứ khác giữ nguyên
 ```
 

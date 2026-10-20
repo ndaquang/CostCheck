@@ -91,4 +91,15 @@ wb = Workbook(); ws = wb.active; ws.append(['Từ', 'Nghĩa chuẩn']); ws.appen
   assert.deepStrictEqual(m.dong_nghia, [['hố đào', 'đào móng']]);
   DXG.setSynonyms();
 });
+t('công cụ học / làm sạch gộp thêm nguồn giá (--them), như trang Điền giá', () => {
+  const { makeDoiThu } = require('./fixture_db.js');
+  fs.writeFileSync(path.join(WORK, 'doithu.js'), 'window.DT = ' + JSON.stringify(makeDoiThu()) + ';\n');
+  const out = path.join(WORK, 'hoc3');
+  const txt = node(path.join(HOC, 'hoc.js'), '--cap', path.join(WORK, 'CapKhop_mau.xlsx'), '--them', path.join(WORK, 'doithu.js'), '--out', out);
+  assert.ok(/Gộp nguồn Đối thủ \(doithu\.js\): 171 dòng/.test(txt), txt);
+  const ls = path.join(WORK, 'ls3');
+  node(path.join(HOC, 'lam_sach.js'), '--them', path.join(WORK, 'doithu.js') + '=Đối thủ', '--out', ls, '--nhanh');
+  assert.ok(fs.existsSync(path.join(ls, 'BAO_CAO_LAM_SACH.xlsx')));
+  assert.throws(() => execFileSync('node', [path.join(HOC, 'lam_sach.js'), '--them', path.join(WORK, 'doithu.js'), '--sua', path.join(WORK, 'x.js')], { stdio: 'pipe' }));
+});
 console.log(`\n${n} nhóm kiểm thử công cụ học đạt.`);
