@@ -3,7 +3,8 @@
    Mặc định dùng CSDL giả lập của demo; dùng CSDL thật dạng data/db.js với --db.
    Dùng: node modules/de_xuat_gia/demo/chay_file.js --boq <file.xlsx> [--extra <đơn giá bổ sung.xlsx> ...]
                                                    [--baseline <file.xlsx>] [--db <db.js>] [--pick p25|p10|med|latest] [--out <thư mục>]
-   Kết quả: <tên>_DaDienGia.xlsx (BOQ đã điền giá, không thêm sheet/cột), KET_QUA.xlsx (báo cáo riêng), ảnh giao diện. */
+                                                   [--mode col|rate]   col (mặc định): giá đề xuất vào cột riêng tô màu; rate: vào ô Đơn giá trống
+   Kết quả: <tên>_DaDienGia.xlsx (BOQ có giá đề xuất, không thêm sheet), KET_QUA.xlsx (báo cáo riêng), ảnh giao diện. */
 const fs = require('fs'), path = require('path'), http = require('http');
 const { execFileSync } = require('child_process');
 let pw; try { pw = require('playwright'); } catch { pw = require(path.join(execFileSync('npm', ['root', '-g']).toString().trim(), 'playwright')); }
@@ -14,7 +15,7 @@ const args = k => argv.flatMap((a, i) => a === k ? [path.resolve(argv[i + 1])] :
 const BOQ = arg('--boq') && path.resolve(arg('--boq'));
 if (!BOQ || !fs.existsSync(BOQ)) { console.error('Cần --boq <file.xlsx>'); process.exit(2); }
 const EXTRA = args('--extra'), BASE = arg('--baseline') && path.resolve(arg('--baseline'));
-const DBJS = arg('--db') && path.resolve(arg('--db')), PICK = arg('--pick') || 'p25';
+const DBJS = arg('--db') && path.resolve(arg('--db')), PICK = arg('--pick') || 'p25', MODE = arg('--mode') === 'rate' ? 'rate' : 'col';
 const MOD = path.resolve(__dirname, '..');
 const OUT = path.resolve(arg('--out') || path.join(__dirname, 'ket_qua_' + path.basename(BOQ).replace(/\.\w+$/, '')));
 const SITE = path.join(OUT, '.trang');
@@ -55,6 +56,7 @@ const srv = http.createServer((req, res) => {
   await page.click('#go'); await page.waitForSelector('#step-res:not([hidden])', { timeout: 120000 });
   const tMatch = Date.now() - t0;
   if (PICK !== 'p25') await page.selectOption('#o-pick', PICK);
+  if (MODE !== 'col') await page.selectOption('#o-mode', MODE);
   if (BASE) { await page.setInputFiles('#f-base', BASE); await page.waitForFunction(() => window.__DXG_STATE.items.some(it => it.baseFile), null, { timeout: 30000 }).catch(() => {}); }
   await page.screenshot({ path: path.join(OUT, '2_ket_qua.png'), fullPage: true });
   const rows = await page.evaluate(() => window.__DXG_STATE.items.map(it => {
@@ -81,13 +83,15 @@ const srv = http.createServer((req, res) => {
     try { fmt = execFileSync('python3', [path.join(MOD, 'tests', 'verify_fill.py'), BOQ, outFile]).toString().trim(); }
     catch (e) { fmt = (e.stdout || '').toString().trim() || String(e); process.exitCode = 1; }
   }
-  const json = { file: path.basename(BOQ), out: outFile && path.basename(outFile), pick: PICK, cauTruc, counts, rows: rows.map((r, k) => ({ ...r, nhom: names[k] })), fmt, tRead, tMatch, tExport,
+  const json = { file: path.basename(BOQ), out: outFile && path.basename(outFile), pick: PICK, mode: MODE, cauTruc, counts, rows: rows.map((r, k) => ({ ...r, nhom: names[k] })), fmt, tRead, tMatch, tExport,
     extra: EXTRA.map(f => path.basename(f)) };
   fs.writeFileSync(path.join(OUT, 'ket_qua.json'), JSON.stringify(json, null, 1));
   execFileSync('python3', [path.join(__dirname, 'bao_cao_xlsx.py'), path.join(OUT, 'ket_qua.json'), path.join(OUT, 'KET_QUA.xlsx'),
     DBJS ? '' : 'Giá lấy từ CSDL GIẢ LẬP của bộ chạy thử (~500 báo giá / 40 nhóm công việc) — chỉ minh họa cách module chạy, không phải giá thị trường thật.']);
-  const nFill = rows.filter(r => r.dien).length, nKeep = rows.filter(r => !r.dien && r.gia).length;
-  console.log(`File: ${path.basename(BOQ)} — ${rows.length} dòng hạng mục · điền ${nFill} · giữ giá có sẵn ${nKeep} · để trống ${rows.length - nFill - nKeep}`);
+  const nFill = rows.filter(r => r.dien).length, nKeep = rows.filter(r => !r.dien && (r.gia || r.gia_co_san)).length;
+  console.log(MODE === 'col'
+    ? `File: ${path.basename(BOQ)} — ${rows.length} dòng hạng mục · có giá đề xuất ${nFill} (cột riêng) · đã có giá QS ${rows.filter(r => r.gia_co_san).length} (giữ nguyên ở cột Đơn giá) · không đề xuất ${rows.length - nFill}`
+    : `File: ${path.basename(BOQ)} — ${rows.length} dòng hạng mục · điền ${nFill} · giữ giá có sẵn ${nKeep} · để trống ${rows.length - nFill - nKeep}`);
   console.log(`Thời gian: đọc ${(tRead / 1000).toFixed(1)} s · khớp ${(tMatch / 1000).toFixed(1)} s · điền + xuất ${(tExport / 1000).toFixed(1)} s`);
   console.log(fmt);
   if (errs.length) { console.error('LỖI TRANG:', errs); process.exitCode = 1; }

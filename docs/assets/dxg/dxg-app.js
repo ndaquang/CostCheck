@@ -19,6 +19,8 @@
   const ADMIN = ROLE === 'admin';
   const FIT = { cao: 'Cao', tb: 'Trung bình', thap: 'Thấp', none: 'Không khớp' };
   const FIT_RANK = { cao: 3, tb: 2, thap: 1, none: 0 };
+  const PROP_FILL = 'FFFFEB9C', PROP_HEAD_FILL = 'FFFFC000';   // màu tô cột giá đề xuất: ô giá / tiêu đề
+  const PICK_SHORT = { p25: 'P25', p10: 'P10', med: 'P50', latest: 'năm gần nhất' };
   const PICK = {
     p25: { label: 'Tốt nhất — cạnh tranh (P25)', f: s => s.p25 },
     p10: { label: 'Thấp nhất hợp lý (P10)', f: s => s.p10 },
@@ -27,7 +29,7 @@
   };
   // Đánh giá giá QS đã có sẵn trong file (nếu có) so với phân bố giá CSDL
   const EVAL = { ok: 'Hợp lý', xem: 'Cần xem', bt: 'Bất thường', nogia: 'Chưa có giá', notk: 'Không có tham khảo', skip: 'Bỏ qua' };
-  const KEYS = [['code', 'Mã/STT'], ['desc', 'Mô tả *'], ['unit', 'Đơn vị'], ['qty', 'Khối lượng'], ['rate', 'Đơn giá * (ô sẽ điền)'], ['amount', 'Thành tiền'], ['base', 'Giá baseline']];
+  const KEYS = [['code', 'Mã/STT'], ['desc', 'Mô tả *'], ['unit', 'Đơn vị'], ['qty', 'Khối lượng'], ['rate', 'Đơn giá (giá QS có sẵn)'], ['amount', 'Thành tiền'], ['base', 'Giá baseline']];
   const PAGE = 300;
   const OWN = /^(TK|DX)_/;   // sheet do phiên bản cũ của phần mềm tạo, bỏ qua khi đọc
 
@@ -38,7 +40,8 @@
     wb: null, fileName: '', sheets: [], lines: [], items: [],
     baseList: null, baseName: '', extra: [], session: null,
     learn: { cap: [], dong_nghia: [] }, learnInfo: null,   // dữ liệu học (.dxgl) đã nạp
-    opt: { pick: 'p25', minFit: 'tb', round: 'auto', overwrite: false, amount: true, yearFrom: null, yearTo: null, types: new Set(), provs: new Set(),
+    // mode: 'col' = ghi giá đề xuất vào CỘT RIÊNG tô màu (mặc định, không đụng cột Đơn giá); 'rate' = điền vào ô Đơn giá đang trống
+    opt: { mode: 'col', pick: 'p25', minFit: 'tb', round: 'auto', overwrite: false, amount: true, yearFrom: null, yearTo: null, types: new Set(), provs: new Set(),
       excludeReview: true, excludeOutlier: true, excludeWarn: false, factor: 1, tolBl: 0.10, tolOk: 0.05, tolBt: 0.15 },
     view: { f: 'all', q: '', shown: PAGE, tab: 'lines', cur: null },
   };
@@ -144,6 +147,8 @@
   }
   function readOptions() {
     const o = S.opt, n = id => { const v = $(id).value.trim(); return v === '' ? null : +v; };
+    o.mode = $('#o-mode').value;
+    $('#o-overwrite').disabled = $('#o-amount').disabled = o.mode === 'col';   // chỉ dùng khi điền vào ô Đơn giá
     o.pick = $('#o-pick').value; o.minFit = $('#o-minfit').value; o.round = $('#o-round').value; o.overwrite = $('#o-overwrite').checked; o.amount = $('#o-amount').checked;
     o.yearFrom = n('#o-yfrom'); o.yearTo = n('#o-yto');
     o.factor = (n('#o-factor') ?? 100) / 100;
@@ -152,6 +157,7 @@
   }
   function writeOptions() {
     const o = S.opt;
+    $('#o-mode').value = o.mode === 'rate' ? 'rate' : 'col';
     $('#o-pick').value = o.pick || 'p25'; $('#o-minfit').value = o.minFit || 'tb'; $('#o-round').value = o.round || 'auto'; $('#o-overwrite').checked = !!o.overwrite; $('#o-amount').checked = o.amount !== false;
     $('#o-yfrom').value = o.yearFrom ?? ''; $('#o-yto').value = o.yearTo ?? '';
     $('#o-factor').value = Math.round(o.factor * 1000) / 10; $('#o-tol').value = Math.round(o.tolBl * 1000) / 10;
@@ -167,14 +173,19 @@
   async function loadBoq(file) {
     try {
       msg('Đang đọc file BOQ…');
-      const wb = await XLSXIO.read(await file.arrayBuffer());
+      const buf = await file.arrayBuffer();
+      const wb = await XLSXIO.read(buf.slice(0));
+      S.src = buf;   // bản gốc: mỗi lần xuất đều ghi lên bản gốc, giá của các lần xuất trước không lẫn vào
       if (S.items.length) S.session = sessionData();   // nạp lại BOQ: giữ lựa chọn, giá tay, ý kiến đã có
       const prev = new Map(S.sheets.filter(s => s.include).map(s => [s.name, s.det]));
       S.wb = wb; S.fileName = file.name; S.sheets = []; S.items = []; S.lines = [];
       wb.sheets.forEach((sh, si) => {
         if (sh.state !== 'visible' || OWN.test(sh.name)) return;
         const grid = wb.grid(si);
-        const det = prev.get(sh.name) || DXG.detectColumns(grid);
+        const fresh = DXG.detectColumns(grid), old = prev.get(sh.name);
+        // nạp lại BOQ cùng sheet: giữ cột QS đã chỉnh, nhưng cột giá đề xuất luôn theo file mới (file đã xuất có thể có sẵn cột này)
+        const det = old ? { ...old, cols: { ...old.cols } } : fresh;
+        if (old) { delete det.cols.prop; if (fresh && fresh.cols.prop !== undefined) det.cols.prop = fresh.cols.prop; }
         // sheet chỉ có thuyết minh / điều kiện chung (không có dòng hạng mục) thì mặc định không dùng
         const nItem = det ? DXG.extractLines(grid, det, sh.name).filter(l => l.kind === 'item').length : 0;
         S.sheets.push({ si, name: sh.name, grid, formulas: wb.formulaCells(si), det: det ? JSON.parse(JSON.stringify(det)) : { headerRow: 0, dataStart: 1, cols: {} }, include: nItem > 0, auto: !!det });
@@ -182,7 +193,7 @@
       $('#n-boq').textContent = file.name;
       const ok = S.sheets.filter(s => s.include).length;
       if (!S.sheets.length) throw new Error('File không có sheet nào để đọc.');
-      msg(ok ? `Đã đọc ${S.sheets.length} sheet, nhận diện được bảng BOQ ở ${ok} sheet. Kiểm tra lại cấu trúc ở bước 2, nhất là cột Đơn giá (ô sẽ được điền).` : 'Không tự nhận ra dòng tiêu đề BOQ. Hãy chọn sheet và cột thủ công ở bước 2.', ok ? 'ok' : 'err');
+      msg(ok ? `Đã đọc ${S.sheets.length} sheet, nhận diện được bảng BOQ ở ${ok} sheet. Kiểm tra lại cấu trúc ở bước 2 (Mô tả, Đơn vị, Khối lượng, Đơn giá).` : 'Không tự nhận ra dòng tiêu đề BOQ. Hãy chọn sheet và cột thủ công ở bước 2.', ok ? 'ok' : 'err');
       renderMap();
       $('#step-map').hidden = false; $('#step-res').hidden = true;
       $('#step-map').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -342,7 +353,7 @@
     const use = S.sheets.filter(s => s.include && s.det.cols.desc !== undefined);
     if (!use.length) { msg('Chưa có sheet nào được chọn hoặc chưa chọn cột Mô tả ở bước 2.', 'err'); return; }
     const noRate = use.filter(s => s.det.cols.rate === undefined).map(s => s.name);
-    if (noRate.length) msg(`Sheet ${noRate.join(', ')} chưa chọn cột Đơn giá: các dòng của sheet này sẽ không được điền giá.`, 'err');
+    if (noRate.length && S.opt.mode === 'rate') msg(`Sheet ${noRate.join(', ')} chưa chọn cột Đơn giá: các dòng của sheet này sẽ không được điền giá.`, 'err');
     const t0 = performance.now(), btn = $('#go');
     btn.disabled = true;
     S.lines = []; S.items = [];
@@ -437,17 +448,19 @@
     // ---- Giá điền và có điền hay không
     const best = shown ? roundPrice(PICK[o.pick].f(st) * f) : null;
     let price = null, fill = false, why = '';
-    const hasRate = it.sh.det.cols.rate !== undefined;
+    const hasRate = it.sh.det.cols.rate !== undefined, col = o.mode === 'col';
+    // Cột riêng: giá đề xuất ghi vào cột mới, ô Đơn giá (kể cả ô đã có giá QS) không bị đụng tới
     if (it.skip) why = 'Không điền (đã chọn bỏ qua)';
-    else if (!hasRate) why = 'Sheet chưa chọn cột Đơn giá';
-    else if (it.rateFormula) why = 'Ô đơn giá là công thức — giữ nguyên';
-    else if (isNum(it.qs) && !o.overwrite) { why = 'Ô đã có giá — giữ nguyên'; price = it.qs; }
+    else if (!col && !hasRate) why = 'Sheet chưa chọn cột Đơn giá';
+    else if (!col && it.rateFormula) why = 'Ô đơn giá là công thức — giữ nguyên';
+    else if (!col && isNum(it.qs) && !o.overwrite) { why = 'Ô đã có giá — giữ nguyên'; price = it.qs; }
     else if (isNum(it.manual)) { price = it.manual; fill = true; why = 'Giá nhập tay'; }
     else if (!shown) why = 'Không có tham khảo trong CSDL — QS tự định giá';
     else if (c.unitOk === false) why = `Khác đơn vị (CSDL: ${IX.groups[c.g].unit}) — không điền`;
     else if (FIT_RANK[fit.level] < FIT_RANK[o.minFit]) { why = `Khớp ${FIT[fit.level].toLowerCase()} — không điền, QS kiểm tra`; }
     else if (!isNum(best) || best <= 0) why = 'Không tính được giá';
     else { price = best; fill = true; why = PICK[o.pick].label + (fit.level === 'cao' ? '' : ` · khớp ${FIT[fit.level].toLowerCase()}, nên kiểm tra`); }
+    if (col) why = why.replace(/không điền/g, 'không đề xuất');
     // ---- Đánh giá giá đang có trong file (nếu QS đã nhập)
     const qs = it.qs, d50 = ref && isNum(qs) && ref.p50 ? qs / ref.p50 - 1 : null;
     let ev;
@@ -468,6 +481,7 @@
       if (st.relaxed) notes.push('Đã nới bộ lọc');
       if (c.ratio !== 1) notes.push(`Quy đổi ${IX.groups[c.g].unit} ×${fmtQ(c.ratio)}`);
       if (IX.groups[c.g].boost) notes.push('Từ đơn giá bổ sung');
+      if (o.mode === 'col' && isNum(it.qs)) notes.push(`Ô Đơn giá đang có ${fmt(it.qs)} — giữ nguyên`);
       if (c.learned && !c.picked) notes.push(c.learned === 'exact' ? 'Theo dữ liệu học (QS đã chọn nhóm này)' : 'Theo dữ liệu học (mô tả gần giống)');
     }
     it.c = { cand: c, shown, st, fit, ref, best, price: finalPrice, fill, why, qs, d50, ev, base, baseSrc, dev, devHi, notes,
@@ -490,7 +504,7 @@
       const c = it.c; if (it.skip) continue;
       t.n++;
       if (c.fill) { t.fill++; if (isNum(c.amt)) t.amtFill += c.amt; }
-      else if (isNum(c.price)) t.keep++;
+      else if (status(c) === 'keep') t.keep++;
       else t.none++;
       if (isNum(c.amt)) t.amt += c.amt;
       if (isNum(c.qs) && c.ev === 'bt') t.bt++;
@@ -500,19 +514,20 @@
     return t;
   }
   function renderKpis() {
-    const t = totals(S.items), dB = t.base ? (t.withBase - t.base) / t.base : null;
+    const t = totals(S.items), dB = t.base ? (t.withBase - t.base) / t.base : null, col = S.opt.mode === 'col';
     $('#kpis').innerHTML = [
-      ['Dòng hạng mục', NF.format(t.n), `${NF.format(t.fill + t.keep)} dòng có giá sau khi điền (${t.n ? Math.round((t.fill + t.keep) / t.n * 100) : 0}%)`, 'all'],
-      ['Sẽ điền giá', NF.format(t.fill), `${PICK[S.opt.pick].label}`, 'fill'],
-      ['Giữ giá đang có', NF.format(t.keep), t.bt ? `${NF.format(t.bt)} giá đang có bất thường so với CSDL` : 'ô đã có giá / công thức', 'keep'],
-      ['Không điền — QS định giá', NF.format(t.none), 'không có tham khảo hoặc khớp chưa đủ tin cậy', 'none'],
-      ['Tổng giá trị sau khi điền', fmt(t.amt), `trong đó phần điền mới ${fmt(t.amtFill)}`, ''],
+      ['Dòng hạng mục', NF.format(t.n), col ? `${NF.format(t.fill)} dòng có giá đề xuất (${t.n ? Math.round(t.fill / t.n * 100) : 0}%)` : `${NF.format(t.fill + t.keep)} dòng có giá sau khi điền (${t.n ? Math.round((t.fill + t.keep) / t.n * 100) : 0}%)`, 'all'],
+      [col ? 'Có giá đề xuất' : 'Sẽ điền giá', NF.format(t.fill), col ? `${PICK[S.opt.pick].label} → cột riêng tô màu` : `${PICK[S.opt.pick].label}`, 'fill'],
+      [col ? 'Chỉ có giá QS' : 'Giữ giá đang có', NF.format(t.keep), t.bt ? `${NF.format(t.bt)} giá đang có bất thường so với CSDL` : col ? 'ô Đơn giá có sẵn, không có đề xuất' : 'ô đã có giá / công thức', 'keep'],
+      [col ? 'Không đề xuất — QS định giá' : 'Không điền — QS định giá', NF.format(t.none), 'không có tham khảo hoặc khớp chưa đủ tin cậy', 'none'],
+      col ? ['Tổng giá trị theo giá đề xuất', fmt(t.amt), 'KL × giá đề xuất (chỉ các dòng có đề xuất)', '']
+        : ['Tổng giá trị sau khi điền', fmt(t.amt), `trong đó phần điền mới ${fmt(t.amtFill)}`, ''],
       ['So với baseline', dB === null ? '—' : pct(dB), dB === null ? (S.baseName ? 'chưa ghép được dòng nào' : 'chưa nạp baseline') : `${NF.format(t.nBase)} dòng · ${NF.format(t.devHi)} dòng lệch > ${Math.round(S.opt.tolBl * 100)}%`, 'dev'],
     ].map(([k, v, s, f]) => `<div class="kpi${f ? ' clickable' : ''}" ${f ? `data-f="${f}"` : ''}><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="s">${esc(s)}</div></div>`).join('');
   }
 
   /* ---------- Bảng ---------- */
-  const status = c => c.fill ? 'fill' : isNum(c.price) ? 'keep' : 'none';
+  const status = c => c.fill ? 'fill' : isNum(c.price) || isNum(c.qs) ? 'keep' : 'none';
   function visible() {
     const { f, q } = S.view, nq = DXG.norm(q);
     const pass = it => {
@@ -528,14 +543,15 @@
     return S.lines.filter(l => l.kind === 'item' && pass(l));
   }
   const ST_BADGE = { fill: ['cao', 'Sẽ điền'], keep: ['tb', 'Giữ giá có sẵn'], none: ['man', 'Không điền'] };
-  const stBadge = it => { const [cls, t] = ST_BADGE[status(it.c)]; return `<span class="badge b-${cls}" title="${esc(it.c.why)}">${t}</span>`; };
+  const ST_BADGE_COL = { fill: ['cao', 'Có đề xuất'], keep: ['tb', 'Chỉ có giá QS'], none: ['man', 'Không đề xuất'] };
+  const stBadge = it => { const [cls, t] = (S.opt.mode === 'col' ? ST_BADGE_COL : ST_BADGE)[status(it.c)]; return `<span class="badge b-${cls}" title="${esc(it.c.why)}">${t}</span>`; };
   const fitBadge = it => it.c.cand ? `<span class="badge b-${it.c.fit.level}" title="Độ phù hợp của nhóm CSDL với mô tả BOQ">${it.c.cand.picked ? 'QS chọn' : FIT[it.c.fit.level]}</span>` : '';
   function rowHtml(l) {
     if (l.kind === 'sheet') return `<tr class="head"><td colspan="11">Sheet: ${esc(l.sheet)}</td></tr>`;
     if (l.kind === 'head') return `<tr class="head"><td>${esc(l.code)}</td><td colspan="10">${esc(l.desc)}</td></tr>`;
     if (l.kind !== 'item') return '';
     const c = l.c, g = c.shown ? IX.groups[c.cand.g] : null;
-    const evTxt = isNum(c.qs) && c.ref ? `<div class="price-sub ${c.ev === 'bt' ? 'd-hi' : ''}">giá có sẵn: ${EVAL[c.ev]} (${pct(c.d50)} so P50)</div>` : '';
+    const evTxt = isNum(c.qs) && c.ref ? `<div class="price-sub ${c.ev === 'bt' ? 'd-hi' : ''}">giá có sẵn${S.opt.mode === 'col' ? ' ' + fmt(c.qs) : ''}: ${EVAL[c.ev]} (${pct(c.d50)} so P50)</div>` : '';
     return `<tr data-id="${esc(l.id)}"${S.view.cur === l ? ' class="sel"' : ''}>
       <td class="small">${esc(l.code)}</td>
       <td class="desc">${esc(l.desc)}${l.ctx ? `<div class="ctx">${esc(l.ctx)}</div>` : ''}${l.note ? `<div class="note">Ý kiến: ${esc(l.note)}</div>` : ''}</td>
@@ -553,7 +569,7 @@
   function renderTable() {
     const rows = visible(), items = rows.filter(l => l.kind === 'item').length;
     $('#res-tbl').innerHTML = `<thead><tr><th>Mã</th><th>Mô tả</th><th>ĐV</th><th class="num">KL</th><th>Nhóm tham khảo trong CSDL</th>
-      <th class="num">P25 – P75</th><th class="num">Đơn giá</th><th>Điền</th><th class="num">Thành tiền</th><th class="num">Baseline</th><th class="num">so BL</th></tr></thead>
+      <th class="num">P25 – P75</th><th class="num">${S.opt.mode === 'col' ? 'Giá đề xuất' : 'Đơn giá'}</th><th>${S.opt.mode === 'col' ? 'Đề xuất' : 'Điền'}</th><th class="num">Thành tiền</th><th class="num">Baseline</th><th class="num">so BL</th></tr></thead>
       <tbody>${rows.slice(0, S.view.shown).map(rowHtml).join('')}</tbody>`;
     $('#flt-count').textContent = `${NF.format(items)} dòng`;
     $('#more').hidden = rows.length <= S.view.shown;
@@ -691,9 +707,59 @@
     <div class="card"><h3>Theo hạng mục cấp 1</h3>${tbl(groupBy(it => `${it.sheet} · ${it.heads[0] || '(không có tiêu đề)'}`), 'Hạng mục')}</div>`;
   }
 
-  /* ---------- Xuất: điền giá trực tiếp vào ô Đơn giá của BOQ ---------- */
+  /* ---------- Xuất: giá đề xuất vào CỘT RIÊNG tô màu (mặc định), hoặc điền vào ô Đơn giá đang trống ---------- */
+  // Cột giá đề xuất của sheet: cột phần mềm đã thêm ở lần trước, nếu không thì cột trống đầu tiên bên phải bảng
+  // (sau mọi ô có dữ liệu và mọi ô gộp từ dòng tiêu đề tới dòng hạng mục cuối)
+  function propColumn(wb, sh, items) {
+    const det = sh.det;
+    if (det.cols.prop !== undefined) return { c: det.cols.prop, reuse: true };
+    const last = Math.max(...items.map(it => it.r));
+    let mx = Math.max(...Object.values(det.cols));
+    for (let r = det.headerRow; r <= last; r++) {
+      const row = sh.grid[r] || [];
+      for (let c = row.length - 1; c > mx; c--) if (row[c] !== null && row[c] !== undefined && row[c] !== '') { mx = c; break; }
+    }
+    const merges = wb.merges(sh.si).filter(m => m.r1 >= det.headerRow && m.r0 <= last);
+    for (let grow = true; grow;) { grow = false; for (const m of merges) if (m.c0 <= mx + 1 && m.c1 > mx) { mx = m.c1; grow = true; } }
+    return { c: mx + 1, reuse: false };
+  }
+  async function exportCol() {
+    const wb = await XLSXIO.read(S.src.slice(0)), C = XLSXIO.colName, out = [];
+    let written = 0; const skipped = [];
+    for (const sh of S.sheets) {
+      const items = S.items.filter(it => it.sh === sh);
+      if (!items.length) continue;
+      const det = sh.det, { c: pc, reuse } = propColumn(wb, sh, items), si = sh.si;
+      const refCol = det.cols.rate ?? det.cols.amount ?? det.cols.qty ?? det.cols.unit ?? det.cols.desc;
+      const two = det.dataStart > det.headerRow + 1;
+      const hs = wb.style({ base: wb.styleOf(si, det.headerRow, refCol), bold: true, fill: PROP_HEAD_FILL, border: true, wrap: true });
+      const label = PICK_SHORT[S.opt.pick] + (S.opt.factor !== 1 ? ` × ${fmtQ(S.opt.factor * 100)}%` : '');
+      const cells = [{ r: det.headerRow, c: pc, v: two ? DXG.PROP_HEAD : `${DXG.PROP_HEAD} — ${label}`, s: hs, force: true }];
+      if (two) cells.push({ r: det.headerRow + 1, c: pc, v: label, s: hs, force: true });
+      let n = 0;
+      for (const it of items) {
+        const pr = it.c.fill && isNum(it.c.price) ? it.c.price : null;
+        if (pr === null && !reuse) continue;   // không có đề xuất: để trống (lần xuất lại thì xóa đề xuất cũ)
+        const vs = pr === null ? undefined : wb.style({ base: wb.styleOf(si, it.r, refCol), fill: PROP_FILL, numFmt: '#,##0', border: true });
+        cells.push({ r: it.r, c: pc, v: pr, s: vs, force: true });
+        if (pr !== null) n++;
+      }
+      const res = wb.fillValues(si, cells);
+      wb.setColWidthRaw(si, pc, 18);
+      written += n; skipped.push(...res.skipped.map(x => `${sh.name}!${x.ref} (${x.why})`));
+      out.push(`${sh.name}: cột ${C(pc)} (${NF.format(n)} giá)`);
+    }
+    if (!written) { msg('Không có dòng nào có giá đề xuất.', 'err'); return { written, skipped }; }
+    const blob = await wb.save();
+    const name = S.fileName.replace(/\.(xlsx|xlsm)$/i, '') + '_DaDienGia' + (/\.xlsm$/i.test(S.fileName) ? '.xlsm' : '.xlsx');
+    download(blob, name);
+    S.lastExport = { written, skipped, cols: out };
+    msg(`Đã ghi ${NF.format(written)} giá đề xuất vào cột riêng "${DXG.PROP_HEAD}" tô màu — ${out.join('; ')}. Cột Đơn giá và Thành tiền của BOQ giữ nguyên.${skipped.length ? ` Bỏ qua ${skipped.length} ô: ${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? '…' : ''}` : ''}`, 'ok');
+    return { written, skipped };
+  }
   async function exportXlsx() {
-    const wb = S.wb, bySheet = new Map(), C = XLSXIO.colName;
+    if (S.opt.mode === 'col') return exportCol();
+    const wb = await XLSXIO.read(S.src.slice(0)), bySheet = new Map(), C = XLSXIO.colName;
     const add = (si, cell) => { if (!bySheet.has(si)) bySheet.set(si, []); bySheet.get(si).push(cell); };
     let nAmt = 0;
     for (const it of S.items) {
@@ -717,29 +783,27 @@
     download(blob, name);
     S.lastExport = { written, skipped };
     msg(`Đã điền ${NF.format(nRate)} ô đơn giá${nAmt ? ` và ${NF.format(nAmt)} ô thành tiền (= KL × đơn giá)` : ''} vào "${name}".${skipped.length ? ` Bỏ qua ${skipped.length} ô: ${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? '…' : ''}` : ''}`, 'ok');
-    // file gốc trong bộ nhớ đã được điền: đọc lại từ file vừa xuất để các lần sau đúng trạng thái
-    S.wb = await XLSXIO.read(await blob.arrayBuffer());
     return { written, skipped };
   }
   // Báo cáo kết quả: file Excel RIÊNG (không ghi vào BOQ) — dùng bộ ghi xlsx của app tra cứu
   function exportReport() {
     const FIT_T = { cao: 'Cao', tb: 'Trung bình', thap: 'Thấp', none: 'Không khớp' };
-    const st = c => c.fill ? 'Đã điền' : isNum(c.price) ? 'Giữ giá có sẵn' : 'Để trống — QS định giá';
-    const t = totals(S.items), o = S.opt;
+    const t = totals(S.items), o = S.opt, col = o.mode === 'col';
+    const st = c => c.fill ? (col ? 'Có giá đề xuất' : 'Đã điền') : status(c) === 'keep' ? (col ? 'Chỉ có giá QS' : 'Giữ giá có sẵn') : 'Để trống — QS định giá';
     const sum = [['Chỉ tiêu', 'Giá trị'],
-      ['File BOQ', S.fileName], ['Cách chọn giá', PICK[o.pick].label], ['Đơn giá bổ sung', S.extra.length ? `${S.extra.length} giá` : 'không'],
+      ['File BOQ', S.fileName], ['Ghi giá vào', col ? `Cột riêng "${DXG.PROP_HEAD}" tô màu (cột Đơn giá giữ nguyên)` : 'Ô Đơn giá đang trống'], ['Cách chọn giá', PICK[o.pick].label], ['Đơn giá bổ sung', S.extra.length ? `${S.extra.length} giá` : 'không'],
       ['Dòng hạng mục', t.n], ['Sẽ điền / đã điền', t.fill], ['Giữ giá có sẵn', t.keep], ['Để trống — QS định giá', t.none],
       ['Tổng giá trị sau khi điền', Math.round(t.amt)], ['  trong đó phần điền mới', Math.round(t.amtFill)],
       ['CSDL', `${NF.format(DBX.count)} đơn giá · giá quy về ${DBX.baseYear || 2026} · cập nhật ${DBX.built || ''}`], ['Lập lúc', new Date().toLocaleString('vi-VN', { hour12: false })]];
-    const det = [['Sheet', 'Dòng', 'Mã', 'Mô tả', 'Tiêu đề gần nhất', 'ĐV', 'KL', 'Nhóm tham khảo CSDL', 'Độ phù hợp', 'Số BG', 'P10', 'P25', 'P50', 'P75', 'P90', 'Đơn giá', 'Thành tiền', 'Trạng thái', 'Lý do', 'Ghi chú']];
+    const det = [['Sheet', 'Dòng', 'Mã', 'Mô tả', 'Tiêu đề gần nhất', 'ĐV', 'KL', 'Nhóm tham khảo CSDL', 'Độ phù hợp', 'Số BG', 'P10', 'P25', 'P50', 'P75', 'P90', col ? 'Giá đề xuất' : 'Đơn giá', 'Thành tiền', 'Trạng thái', 'Lý do', 'Ghi chú', 'Giá có sẵn trong BOQ']];
     for (const it of S.items) {
       const c = it.c, g = c.shown ? IX.groups[c.cand.g] : null, R = c.ref;
       det.push([it.sheet, it.r + 1, it.code, it.desc, it.heads[it.heads.length - 1] || '', it.unit, it.qty, g ? g.name : '', c.cand ? FIT_T[c.fit.level] : '', g ? c.st.n : null,
-        ...(R ? [R.p10, R.p25, R.p50, R.p75, R.p90].map(Math.round) : [null, null, null, null, null]), c.price, isNum(c.amt) ? Math.round(c.amt) : null, st(c), c.why, it.note]);
+        ...(R ? [R.p10, R.p25, R.p50, R.p75, R.p90].map(Math.round) : [null, null, null, null, null]), c.price, isNum(c.amt) ? Math.round(c.amt) : null, st(c), c.why, it.note, c.qs]);
     }
     const blob = window.writeWorkbook([
       { name: 'Tóm tắt', rows: sum, widths: [32, 70], nums: new Set([1]) },
-      { name: 'Chi tiết', rows: det, widths: [14, 6, 6, 48, 30, 7, 10, 38, 11, 7, 11, 11, 11, 11, 11, 12, 15, 20, 38, 30], nums: new Set([10, 11, 12, 13, 14, 15, 16]) },
+      { name: 'Chi tiết', rows: det, widths: [14, 6, 6, 48, 30, 7, 10, 38, 11, 7, 11, 11, 11, 11, 11, 12, 15, 20, 38, 30, 14], nums: new Set([10, 11, 12, 13, 14, 15, 16, 20]) },
     ]);
     download(blob, S.fileName.replace(/\.(xlsx|xlsm)$/i, '') + '_BaoCaoDienGia.xlsx');
   }
@@ -777,7 +841,7 @@
     onFile('#f-boq', loadBoq); onFile('#f-extra', loadExtra); onFile('#f-base', loadBase); onFile('#f-sess', loadSession);
     $('#map-tbl').addEventListener('change', onMapChange);
     $('#go').addEventListener('click', runAll);
-    for (const id of ['#o-pick', '#o-minfit', '#o-round', '#o-overwrite', '#o-amount', '#o-yfrom', '#o-yto', '#o-factor', '#o-tol', '#o-review', '#o-outlier', '#o-warn']) $(id).addEventListener('change', recompute);
+    for (const id of ['#o-mode', '#o-pick', '#o-minfit', '#o-round', '#o-overwrite', '#o-amount', '#o-yfrom', '#o-yto', '#o-factor', '#o-tol', '#o-review', '#o-outlier', '#o-warn']) $(id).addEventListener('change', recompute);
     $('#flt').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setFilter(b.dataset.f); });
     $('#kpis').addEventListener('click', e => { const k = e.target.closest('.kpi[data-f]'); if (k) { switchTab('lines'); setFilter(k.dataset.f); } });
     let tq; $('#flt-q').addEventListener('input', e => { clearTimeout(tq); tq = setTimeout(() => { S.view.q = e.target.value; S.view.shown = PAGE; renderTable(); }, 200); });

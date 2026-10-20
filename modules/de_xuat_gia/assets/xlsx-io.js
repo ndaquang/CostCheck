@@ -456,27 +456,43 @@
       d.setAttribute('ref', `${ref(Math.min(pa.r, 0), Math.min(pa.c, 0))}:${ref(Math.max(pb.r, sh.maxR), Math.max(pb.c, sh.maxC))}`);
     }
     /* --- Điền giá trực tiếp vào BOQ: sửa CHUỖI XML tại đúng ô, không phân tích lại / ghi lại cả sheet ---
-       cells: [{ r, c, v, f? }] (r, c tính từ 0; f = công thức không có dấu "=", v = giá trị đệm).
-       Chỉ ghi vào ô trống (hoặc ô số khi overwrite); không bao giờ đụng ô
+       cells: [{ r, c, v, f?, s?, force? }] (r, c tính từ 0; f = công thức không có dấu "=", v = giá trị đệm — số, hoặc chuỗi;
+       s = style mới cho ô (chỉ dùng cho cột riêng do phần mềm thêm); force = ghi đè ô số / chữ (không bao giờ đè công thức);
+       v = null kèm force: xóa giá trị cũ của ô).
+       Mặc định chỉ ghi vào ô trống (hoặc ô số khi overwrite); không bao giờ đụng ô
        công thức hay ô chữ. Giữ nguyên style (s), mọi thuộc tính và mọi byte khác của sheet.
        -> { written: [ref], skipped: [{ ref, why }] } */
     fillValues(si, cells, o = {}) {
       const sh = this.sheets[si];
       let x = dec.decode(this.files.get(sh.path));
       const written = [], skipped = [];
-      for (const { r, c, v, f } of cells) {
+      let maxR = -1, maxC = -1;
+      for (const { r, c, v, f, s, force } of cells) {
         const R = ref(r, c);
         const sd0 = x.indexOf('<sheetData'), sd1 = x.lastIndexOf('</sheetData');
         const zone = sd0 >= 0 ? [sd0, sd1 < 0 ? x.length : sd1] : [0, x.length];
-        const val = String(v);
-        const body = vt => (f ? `<${vt.replace(/v$/, 'f')}>${xesc(f)}</${vt.replace(/v$/, 'f')}>` : '') + `<${vt}>${val}</${vt}>`;
+        const str = typeof v === 'string', none = v === null || v === undefined;
+        const val = str ? xesc(v) : String(v);
+        // chuỗi: <is><t>…</t></is> kèm t="inlineStr"; số: <v>…</v>; null (kèm force): xóa giá trị, giữ style
+        const body = vt => {
+          const p = vt.slice(0, -1);
+          if (none) return '';
+          if (str) return `<${p}is><${p}t xml:space="preserve">${val}</${p}t></${p}is>`;
+          return (f ? `<${p}f>${xesc(f)}</${p}f>` : '') + `<${vt}>${val}</${vt}>`;
+        };
+        const fixAttrs = a => {
+          a = a.replace(/\st="[^"]*"/, '');   // ô trống có thể mang t= thừa
+          if (s !== undefined) a = /\ss="/.test(a) ? a.replace(/\ss="[^"]*"/, ` s="${s}"`) : a + ` s="${s}"`;
+          return str ? a + ' t="inlineStr"' : a;
+        };
+        if (r > maxR) maxR = r; if (c > maxC) maxC = c;
         const reCell = new RegExp(`<((?:\\w+:)?c)\\b([^>]*?\\sr="${R}"[^>]*?)(/?)>`, 'g');
         reCell.lastIndex = zone[0];
         const m = reCell.exec(x);
         if (m && m.index < zone[1]) {
           const tag = m[1], attrs = m[2], selfClose = m[3] === '/', start = m.index, openEnd = start + m[0].length;
           const tAttr = (/\st="([^"]*)"/.exec(attrs) || [])[1];
-          const cleanAttrs = attrs.replace(/\st="[^"]*"/, '');   // ô trống có thể mang t= thừa
+          const cleanAttrs = fixAttrs(attrs);
           if (selfClose) {
             x = x.slice(0, start) + `<${tag}${cleanAttrs}>${body(tag.replace(/c$/, 'v'))}</${tag}>` + x.slice(openEnd);
             written.push(R); continue;
@@ -485,8 +501,8 @@
           const inner = x.slice(openEnd, close);
           if (/<(\w+:)?f[\s>/]/.test(inner)) { skipped.push({ ref: R, why: 'công thức' }); continue; }
           const hasV = /<(\w+:)?(v|is)[\s>]/.test(inner) && !/<(\w+:)?v\s*\/>|<(\w+:)?v><\/(\w+:)?v>/.test(inner);
-          if (hasV && (tAttr === 's' || tAttr === 'str' || tAttr === 'inlineStr' || tAttr === 'b' || tAttr === 'e')) { skipped.push({ ref: R, why: 'ô chữ' }); continue; }
-          if (hasV && !o.overwrite) { skipped.push({ ref: R, why: 'đã có giá' }); continue; }
+          if (hasV && !force && (tAttr === 's' || tAttr === 'str' || tAttr === 'inlineStr' || tAttr === 'b' || tAttr === 'e')) { skipped.push({ ref: R, why: 'ô chữ' }); continue; }
+          if (hasV && !o.overwrite && !force) { skipped.push({ ref: R, why: 'đã có giá' }); continue; }
           const vt = tag.replace(/c$/, 'v');
           x = x.slice(0, start) + `<${tag}${cleanAttrs}>${body(vt)}</${tag}>` + x.slice(close + tag.length + 3);
           written.push(R); continue;
@@ -497,7 +513,15 @@
         const rm = reRow.exec(x);
         if (!rm || rm.index >= zone[1]) { skipped.push({ ref: R, why: 'không có dòng' }); continue; }
         const rowTag = rm[1], cTag = rowTag.replace(/row$/, 'c'), vTag = rowTag.replace(/row$/, 'v');
-        const cellXml = `<${cTag} r="${R}">${body(vTag)}</${cTag}>`;
+        // spans="1:8" (gợi ý phạm vi cột của dòng): nới ra để bao ô mới nằm ngoài bảng
+        const sp = /\sspans="(\d+):(\d+)"/.exec(rm[2]);
+        if (sp && c + 1 > +sp[2]) {
+          rm[2] = rm[2].replace(sp[0], ` spans="${sp[1]}:${c + 1}"`);
+          const open = `<${rowTag}${rm[2]}${rm[3]}>`;
+          x = x.slice(0, rm.index) + open + x.slice(rm.index + rm[0].length);
+          rm[0] = open;
+        }
+        const cellXml = `<${cTag}${fixAttrs(` r="${R}"`)}>${body(vTag)}</${cTag}>`;
         if (rm[3] === '/') { x = x.slice(0, rm.index) + `<${rowTag}${rm[2]}>${cellXml}</${rowTag}>` + x.slice(rm.index + rm[0].length); written.push(R); continue; }
         const rowOpenEnd = rm.index + rm[0].length, rowClose = x.indexOf(`</${rowTag}>`, rowOpenEnd);
         const content = x.slice(rowOpenEnd, rowClose);
@@ -507,8 +531,53 @@
         x = x.slice(0, rowOpenEnd + ins) + cellXml + x.slice(rowOpenEnd + ins);
         written.push(R);
       }
-      if (written.length) { this.files.set(sh.path, enc.encode(x)); this.docs.delete(sh.path); }
+      if (written.length) {
+        // vùng dữ liệu khai báo (<dimension>) phải bao cả ô mới ngoài bảng, nếu không một số chương trình đọc bỏ sót
+        const dm = /<((?:\w+:)?)dimension\b([^>]*?)\sref="([^"]*)"/.exec(x);
+        if (dm) {
+          const [a, b] = dm[3].split(':'), pa = parseRef(a), pb = parseRef(b || a);
+          if (pa && pb && (maxR > pb.r || maxC > pb.c)) {
+            const nr = `${a}:${ref(Math.max(pb.r, maxR), Math.max(pb.c, maxC))}`;
+            x = x.slice(0, dm.index) + dm[0].replace(`ref="${dm[3]}"`, `ref="${nr}"`) + x.slice(dm.index + dm[0].length);
+          }
+        }
+        this.files.set(sh.path, enc.encode(x)); this.docs.delete(sh.path);
+      }
       return { written, skipped };
+    }
+    // Độ rộng cột c (sửa CHUỖI XML như fillValues): cột nằm trong một khoảng <col min..max> thì tách khoảng đó ra,
+    // phần còn lại giữ nguyên thuộc tính; cột luôn được hiện (bỏ hidden) để thấy được cột phần mềm thêm vào
+    setColWidthRaw(si, c, width) {
+      const sh = this.sheets[si];
+      let x = dec.decode(this.files.get(sh.path));
+      const n = c + 1;
+      const pre = (/<(\w+:)?worksheet\b/.exec(x) || [])[1] || '';
+      const mine = `<${pre}col min="${n}" max="${n}" width="${width}" customWidth="1"/>`;
+      const cs = x.search(new RegExp(`<${pre}cols>`));
+      if (cs < 0) {
+        const sd = x.search(new RegExp(`<${pre}sheetData[\\s>/]`));
+        if (sd < 0) return;
+        x = x.slice(0, sd) + `<${pre}cols>${mine}</${pre}cols>` + x.slice(sd);
+      } else {
+        const ce = x.indexOf(`</${pre}cols>`, cs);
+        const inner = x.slice(cs + pre.length + 6, ce);
+        const els = inner.match(/<(?:\w+:)?col\b[^>]*\/>/g) || [];
+        const out = [];
+        let placed = false;
+        for (const el of els) {
+          const mn = +(/\smin="(\d+)"/.exec(el) || [])[1], mx = +(/\smax="(\d+)"/.exec(el) || [])[1];
+          if (!placed && mn > n) { out.push(mine); placed = true; }
+          if (mn <= n && mx >= n) {
+            const part = (a, b) => el.replace(/\smin="\d+"/, ` min="${a}"`).replace(/\smax="\d+"/, ` max="${b}"`);
+            if (mn < n) out.push(part(mn, n - 1));
+            out.push(mine); placed = true;
+            if (mx > n) out.push(part(n + 1, mx));
+          } else out.push(el);
+        }
+        if (!placed) out.push(mine);
+        x = x.slice(0, cs + pre.length + 6) + out.join('') + x.slice(ce);
+      }
+      this.files.set(sh.path, enc.encode(x)); this.docs.delete(sh.path);
     }
     // Các ô có công thức trong sheet (để biết trước ô nào không được điền)
     formulaCells(si) {

@@ -74,7 +74,7 @@
   <!-- Bước 2: cấu trúc -->
   <section class="card" id="step-map" hidden>
     <h2><span class="step">2</span> Kiểm tra cấu trúc bảng</h2>
-    <p class="muted small">Phần mềm đã tự nhận diện dòng tiêu đề và các cột. <b>Cột "Đơn giá" là nơi giá sẽ được điền</b> — kiểm tra kỹ cột này. Sửa lại cột nếu nhận sai, bỏ chọn sheet không cần điền giá.</p>
+    <p class="muted small">Phần mềm đã tự nhận diện dòng tiêu đề và các cột. Mặc định giá đề xuất được ghi vào <b>một cột riêng tô màu "ĐƠN GIÁ ĐỀ XUẤT (CSDL)" ngay sau bảng</b>; cột "Đơn giá" chỉ dùng để đọc giá QS có sẵn (hoặc để điền nếu chọn "Ghi giá vào: Ô Đơn giá đang trống"). Sửa lại cột nếu nhận sai, bỏ chọn sheet không cần điền giá.</p>
     <div class="tbl-wrap"><table class="map" id="map-tbl"></table></div>
     <div class="dx-actions"><button class="btn primary" id="go">Tính giá điền →</button></div>
   </section>
@@ -82,6 +82,7 @@
   <!-- Bước 3: kết quả -->
   <section id="step-res" hidden>
     <div class="card opts">
+      <div class="opt"><label for="o-mode">Ghi giá vào</label><select id="o-mode"><option value="col" selected>Cột riêng "Đơn giá đề xuất" (tô màu)</option><option value="rate">Ô Đơn giá đang trống</option></select></div>
       <div class="opt"><label for="o-pick">Giá điền</label><select id="o-pick"></select></div>
       <div class="opt"><label for="o-minfit">Chỉ điền khi khớp ≥</label><select id="o-minfit"><option value="cao">Cao</option><option value="tb" selected>Trung bình</option><option value="thap">Thấp</option></select></div>
       <div class="opt"><label for="o-round">Làm tròn</label><select id="o-round"><option value="auto" selected>Tự động</option><option value="1000">1.000 đ</option><option value="100">100 đ</option><option value="none">Không</option></select></div>
@@ -91,7 +92,7 @@
       <div class="opt"><label>Loại hình dự án</label><details class="msel" id="o-type"><summary>Tất cả</summary><div class="msel-list"></div></details></div>
       <div class="opt"><label>Tỉnh/TP</label><details class="msel" id="o-prov"><summary>Tất cả</summary><div class="msel-list"></div></details></div>
       <div class="opt"><label for="o-tol">Ngưỡng lệch baseline</label><input id="o-tol" type="number" value="10" step="1"><span class="unit">%</span></div>
-      <div class="opt chk"><label><input type="checkbox" id="o-review" checked> Bỏ dòng REVIEW</label><label><input type="checkbox" id="o-outlier" checked> Bỏ giá ngoại lai</label><label><input type="checkbox" id="o-warn"> Bỏ dòng có cảnh báo</label><label><input type="checkbox" id="o-overwrite"> Ghi đè ô đã có giá</label><label><input type="checkbox" id="o-amount" checked> Ô Thành tiền trống: điền = KL × Đơn giá</label></div>
+      <div class="opt chk"><label><input type="checkbox" id="o-review" checked> Bỏ dòng REVIEW</label><label><input type="checkbox" id="o-outlier" checked> Bỏ giá ngoại lai</label><label><input type="checkbox" id="o-warn"> Bỏ dòng có cảnh báo</label><label title="Chỉ dùng khi ghi vào ô Đơn giá"><input type="checkbox" id="o-overwrite"> Ghi đè ô đã có giá</label><label title="Chỉ dùng khi ghi vào ô Đơn giá"><input type="checkbox" id="o-amount" checked> Ô Thành tiền trống: điền = KL × Đơn giá</label></div>
     </div>
 
     <div class="kpis" id="kpis"></div>
@@ -103,7 +104,7 @@
       <button class="btn" id="save-sess" title="Lưu nhóm đã chọn, giá tay, đơn giá bổ sung để làm tiếp sau">Lưu phiên</button>
       <button class="btn" id="save-learn" title="Lưu các lần QS chọn nhóm (cộng dồn với dữ liệu học đã nạp) để lần sau khớp đúng ngay">Lưu dữ liệu học</button>
       <button class="btn" id="dx-report" title="Báo cáo từng dòng: giá điền, P10–P90, lý do — file Excel riêng, không ghi vào BOQ">Xuất báo cáo Excel</button>
-      <button class="btn primary" id="dx-export" title="Điền giá vào cột Đơn giá của chính file BOQ và tải về">Xuất Excel đã điền giá</button>
+      <button class="btn primary" id="dx-export" title="Ghi giá đề xuất vào file BOQ (mặc định: cột riêng tô màu, không đụng cột Đơn giá) và tải về">Xuất Excel đã điền giá</button>
     </div>
 
     <div id="tab-lines">

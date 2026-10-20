@@ -509,7 +509,9 @@
     }
     return best;
   }
+  const PROP_HEAD = 'ĐƠN GIÁ ĐỀ XUẤT (CSDL)', PROP_RE = /\bde xuat csdl\b/;
   // grid: mảng 2 chiều giá trị ô (chuỗi/số/null). -> { headerRow, cols: {key: colIndex}, dataStart }
+  //   cols.prop: cột giá đề xuất phần mềm đã thêm ở lần xuất trước (nếu có) — lần xuất sau ghi lại vào đúng cột đó
   function detectColumns(grid, maxScan = 40) {
     let best = null;
     for (let r = 0; r < Math.min(grid.length, maxScan); r++) {
@@ -521,6 +523,8 @@
       const cols = {}, score = {};
       for (let c = 0; c < Math.max(row.length, next.length); c++) {
         const txt = [row[c], typeof next[c] === 'string' ? next[c] : ''].filter(v => typeof v === 'string').join(' ');
+        // cột "ĐƠN GIÁ ĐỀ XUẤT (CSDL)" do chính phần mềm thêm ở lần xuất trước: không phải cột đơn giá của BOQ
+        if (PROP_RE.test(norm(txt))) { if (cols.prop === undefined) cols.prop = c; continue; }
         for (const key of Object.keys(COLS)) {
           let s = headerScore(txt, key);
           if (!s) continue;
@@ -544,7 +548,7 @@
     if (!best) return null;
     // Cột trùng nhau: ưu tiên mô tả/đơn vị/khối lượng
     const used = new Set();
-    for (const k of ['desc', 'unit', 'qty', 'rate', 'amount', 'code', 'mat', 'lab', 'base', 'note']) {
+    for (const k of ['prop', 'desc', 'unit', 'qty', 'rate', 'amount', 'code', 'mat', 'lab', 'base', 'note']) {
       if (best.cols[k] === undefined) continue;
       if (used.has(best.cols[k])) delete best.cols[k]; else used.add(best.cols[k]);
     }
@@ -670,5 +674,5 @@
     return { d, pct: baseline ? d / baseline : null, amt: isNum(qty) ? d * qty : null };
   }
 
-  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, diff, toNum, COLS };
+  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, diff, toNum, COLS, PROP_HEAD };
 });
