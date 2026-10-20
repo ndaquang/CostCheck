@@ -61,10 +61,10 @@
         <span class="fname" id="n-base"></span>
       </label>
       <label class="drop small-drop" id="drop-sess">
-        <input type="file" id="f-sess" accept=".json,.dgbq">
-        <b>Mở phiên đã lưu</b>
-        <span class="btn pick">Mở phiên…</span>
-        <span class="muted small">Khôi phục nhóm đã chọn, giá tay, đơn giá bổ sung (.dgbq).</span>
+        <input type="file" id="f-sess" accept=".json,.dgbq,.dxgl">
+        <b>Mở phiên / dữ liệu học</b>
+        <span class="btn pick">Mở file…</span>
+        <span class="muted small">Phiên đã lưu (.dgbq): nhóm đã chọn, giá tay, đơn giá bổ sung. Dữ liệu học (.dxgl): các lần QS chọn nhóm, dùng để khớp đúng ngay.</span>
         <span class="fname" id="n-sess"></span>
       </label>
     </div>
@@ -101,6 +101,7 @@
       <button class="tab" data-tab="sum">Tổng hợp</button>
       <div class="spacer"></div>
       <button class="btn" id="save-sess" title="Lưu nhóm đã chọn, giá tay, đơn giá bổ sung để làm tiếp sau">Lưu phiên</button>
+      <button class="btn" id="save-learn" title="Lưu các lần QS chọn nhóm (cộng dồn với dữ liệu học đã nạp) để lần sau khớp đúng ngay">Lưu dữ liệu học</button>
       <button class="btn" id="dx-report" title="Báo cáo từng dòng: giá điền, P10–P90, lý do — file Excel riêng, không ghi vào BOQ">Xuất báo cáo Excel</button>
       <button class="btn primary" id="dx-export" title="Điền giá vào cột Đơn giá của chính file BOQ và tải về">Xuất Excel đã điền giá</button>
     </div>

@@ -5,6 +5,7 @@
    3. BOQ đã có một phần giá QS → ô có giá được giữ, chỉ ô trống được điền.
    4. Đơn giá bổ sung → dòng trước đó không có tham khảo được điền theo giá bổ sung.
    5. Giá điền tay + lưu / khôi phục phiên.
+   6. Dữ liệu học: lựa chọn nhóm của QS được lưu (.dxgl) và dùng lại khi khớp.
    Dùng: node tests/e2e.js <thư mục tạm>   (cần playwright, python3 + openpyxl, LibreOffice) */
 const fs = require('fs'), path = require('path'), http = require('http');
 const { execFileSync } = require('child_process');
@@ -114,6 +115,24 @@ print(json.dumps([[ws.cell(r,4).value, ws.cell(r,5).value, ws.cell(r,7).value] f
   await page.screenshot({ path: path.join(WORK, 'sum.png'), fullPage: true });
   const f3 = await exportFile('lan3_DaDienGia.xlsx');
   verify(path.join(WORK, 'BOQ_mau.xlsx'), f3);
+
+  console.log('6. Dữ liệu học: QS chọn nhóm khác → lưu .dxgl → lần sau khớp đúng ngay');
+  await page.click(".tab[data-tab=lines]");
+  const pickId = await page.evaluate(() => window.__DXG_STATE.items.find(it => it.cands.length >= 2 && !it.qs).id);
+  await page.click(`#res-tbl tr[data-id="${pickId}"]`); await page.waitForSelector('#dxg-drawer:not([hidden])');
+  await page.click('#dw-body .cand[data-k="1"]');
+  const want = await page.evaluate(id => { const it = window.__DXG_STATE.items.find(x => x.id === id); return it.cands[it.sel].g; }, pickId);
+  await page.click('#dw-close');
+  const [dlL] = await Promise.all([page.waitForEvent('download'), page.click('#save-learn')]);
+  const learnFile = path.join(WORK, dlL.suggestedFilename()); await dlL.saveAs(learnFile);
+  const model = JSON.parse(fs.readFileSync(learnFile, 'utf8'));
+  check(model.dinh_dang === 'DXGL1' && model.cap.length === 1 && model.cap[0].neg.length === 1, `file dữ liệu học: ${model.cap.length} cặp, có ghi nhóm bị bác`);
+  await page.reload(); await page.waitForSelector('#splash', { state: 'detached' });
+  await run(path.join(WORK, 'BOQ_mau.xlsx'));
+  await page.setInputFiles('#f-sess', learnFile);
+  await page.waitForFunction(() => /dữ liệu học/.test(document.querySelector('#load-msg').textContent));
+  const got = await page.evaluate(id => { const it = window.__DXG_STATE.items.find(x => x.id === id); const c = it.cands[it.sel]; return { g: c.g, learned: c.learned, fit: it.c.fit.level }; }, pickId);
+  check(got.g === want && got.learned === 'exact' && got.fit === 'cao', `dòng ${pickId} khớp nhóm QS đã chọn, độ khớp ${got.fit}`);
 
   if (errs.length) { console.error('LỖI TRANG:', errs); fails++; }
   await browser.close(); srv.close();

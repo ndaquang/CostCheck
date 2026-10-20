@@ -37,6 +37,7 @@
   const S = {
     wb: null, fileName: '', sheets: [], lines: [], items: [],
     baseList: null, baseName: '', extra: [], session: null,
+    learn: { cap: [], dong_nghia: [] }, learnInfo: null,   // dữ liệu học (.dxgl) đã nạp
     opt: { pick: 'p25', minFit: 'tb', round: 'auto', overwrite: false, amount: true, yearFrom: null, yearTo: null, types: new Set(), provs: new Set(),
       excludeReview: true, excludeOutlier: true, excludeWarn: false, factor: 1, tolBl: 0.10, tolOk: 0.05, tolBt: 0.15 },
     view: { f: 'all', q: '', shown: PAGE, tab: 'lines', cur: null },
@@ -104,7 +105,9 @@
   }
   function rebuildIndex() {
     if (!DBX) DBX = window.DB;
+    DXG.setSynonyms(S.learn.dong_nghia);
     IX = DXG.buildIndex(DBX);
+    S.learnInfo = S.learn.cap.length ? DXG.applyLearn(IX, S.learn) : null;
     // đơn giá bổ sung (dữ liệu mới nhất của người dùng) được ưu tiên nhẹ khi khớp
     const bs = S.extra.length ? (DBX.projects || []).findIndex(p => p[0] === 'BOSUNG') : -1;
     if (bs >= 0) for (const g of IX.groups) if (g.rows.every(i => IX.C.p[i] === bs)) g.boost = 1.08;
@@ -253,7 +256,8 @@
   async function loadSession(file) {
     try {
       const j = JSON.parse(await file.text());
-      if (!['DGBQ1', 'DGBQ2', 'DGBQ3'].includes(j.dinh_dang)) throw new Error('Không phải file phiên làm việc.');
+      if (j.dinh_dang === 'DXGL1') return loadLearn(j, file.name);
+      if (!['DGBQ1', 'DGBQ2', 'DGBQ3'].includes(j.dinh_dang)) throw new Error('Không phải file phiên làm việc hay dữ liệu học.');
       S.session = j;
       $('#n-sess').textContent = file.name;
       if (j.opt) { Object.assign(S.opt, j.opt, { types: new Set(j.opt.types || []), provs: new Set(j.opt.provs || []) }); writeOptions(); }
@@ -262,6 +266,38 @@
       if (S.items.length) { rematch(j); msg('Đã khôi phục phiên làm việc.', 'ok'); }
       else msg(`Đã nạp phiên của file "${j.file || ''}". Nạp file BOQ tương ứng để tiếp tục.`, 'ok');
     } catch (e) { msg('Không mở được phiên: ' + (e.message || e), 'err'); }
+  }
+
+  /* ---------- Dữ liệu học: nhớ nhóm QS đã chọn cho từng mô tả ---------- */
+  function loadLearn(j, name) {
+    const sess = S.items.length ? sessionData() : null;
+    S.learn = DXG.mergeLearn(S.learn, j);
+    rebuildIndex();
+    const r = S.learnInfo || { nhan: 0, mat: 0 };
+    $('#n-sess').textContent = name;
+    if (sess) rematch(sess);
+    msg(`Đã nạp dữ liệu học: ${NF.format(r.nhan)} lựa chọn của QS${r.mat ? `, ${NF.format(r.mat)} lựa chọn không còn nhóm trong CSDL` : ''}${S.learn.dong_nghia.length ? `, ${S.learn.dong_nghia.length} cặp từ đồng nghĩa` : ''}.`, 'ok');
+  }
+  const gref = gid => { const g = IX.groups[gid]; return { gk: g.key, gn: g.name, gu: g.unit }; };
+  // Lựa chọn của QS trong phiên hiện tại: dòng QS tự chọn nhóm (khác hoặc xác nhận nhóm tự khớp)
+  function sessionPairs() {
+    const cap = [];
+    for (const it of S.items) {
+      const c = it.sel >= 0 ? it.cands[it.sel] : null;
+      if (!c || !c.picked) continue;
+      const neg = it.auto >= 0 && it.auto !== c.g ? [gref(it.auto)] : [];
+      cap.push({ d: it.desc, u: it.unit, n: it.heads[it.heads.length - 1] || '', ...gref(c.g), neg, so: 1 });
+    }
+    return cap;
+  }
+  function saveLearn() {
+    const cur = sessionPairs();
+    if (!cur.length && !S.learn.cap.length) { msg('Chưa có lựa chọn nào của QS để học. Mở chi tiết dòng và chọn nhóm đúng trước.', 'err'); return; }
+    // cặp đã nạp trước đó không cộng lại lần nữa khi lưu nhiều lần trong cùng phiên
+    const model = DXG.mergeLearn(S.learn, { cap: cur });
+    model.tao_luc = new Date().toISOString(); model.csdl = { built: DBX.built || '', count: DBX.count };
+    download(new Blob([JSON.stringify(model)], { type: 'application/json' }), 'du_lieu_hoc_' + new Date().toISOString().slice(0, 10) + '.dxgl');
+    msg(`Đã lưu dữ liệu học: ${NF.format(model.cap.length)} cặp mô tả → nhóm (${NF.format(cur.length)} từ phiên này).`, 'ok');
   }
 
   /* ---------- Bước 2: cấu trúc ---------- */
@@ -319,6 +355,7 @@
           l.id = `${sh.name}|${l.r}`; l.si = sh.si; l.sh = sh;
           l.cands = matchLine(l);
           l.sel = l.cands.length ? 0 : -1;
+          l.auto = l.cands.length ? l.cands[0].g : -1;   // nhóm phần mềm đề xuất (ghi nhận là nhóm bị bác khi QS chọn nhóm khác)
           l.baseCol = isNum(l.base) && l.base > 0 ? l.base : null;
           l.baseFile = null; l.baseManual = null; l.manual = null; l.skip = false; l.note = '';
           l.qs = isNum(l.rate) && l.rate > 0 ? l.rate : null;   // giá đang có trong ô đơn giá
@@ -344,7 +381,7 @@
   const matchLine = l => DXG.match(IX, { desc: l.desc, unit: l.unit, ctx: l.ctx, near: l.heads[l.heads.length - 1] || '' });
   // CSDL đổi (thêm đơn giá bổ sung): khớp lại, giữ lựa chọn của người dùng
   function rematch(sess = sessionData()) {
-    for (const it of S.items) { it.cands = matchLine(it); it.sel = it.cands.length ? 0 : -1; }
+    for (const it of S.items) { it.cands = matchLine(it); it.sel = it.cands.length ? 0 : -1; it.auto = it.cands.length ? it.cands[0].g : -1; }
     S.session = sess; applySession(); applyBaseline(); recompute();
   }
   function applyBaseline() {
@@ -431,6 +468,7 @@
       if (st.relaxed) notes.push('Đã nới bộ lọc');
       if (c.ratio !== 1) notes.push(`Quy đổi ${IX.groups[c.g].unit} ×${fmtQ(c.ratio)}`);
       if (IX.groups[c.g].boost) notes.push('Từ đơn giá bổ sung');
+      if (c.learned && !c.picked) notes.push(c.learned === 'exact' ? 'Theo dữ liệu học (QS đã chọn nhóm này)' : 'Theo dữ liệu học (mô tả gần giống)');
     }
     it.c = { cand: c, shown, st, fit, ref, best, price: finalPrice, fill, why, qs, d50, ev, base, baseSrc, dev, devHi, notes,
       amt: isNum(finalPrice) && isNum(it.qty) ? finalPrice * it.qty : null, amtBase: isNum(base) && isNum(it.qty) ? base * it.qty : null };
@@ -551,7 +589,7 @@
       <input type="radio" name="cand"${it.sel === k ? ' checked' : ''}>
       <div><div class="nm">${esc(g.name)}${g.boost ? ' <span class="badge b-tb">bổ sung</span>' : ''}</div>
         <div class="small muted">ĐV ${esc(g.unit || '?')}${conv}${c.unitOk === false ? ' · <b class="d-hi">khác đơn vị</b>' : ''} · ${st.n} báo giá · ${st.proj} dự án · gần nhất ${st.latest || '?'}${st.relaxed ? ' · đã nới bộ lọc' : ''}</div></div>
-      <div class="num"><b>${fmt(roundPrice(PICK[S.opt.pick].f(st) * f))}</b><div class="price-sub">P25–P75 ${fmt(st.p25 * f)} – ${fmt(st.p75 * f)}</div><div class="price-sub">${c.picked ? 'QS chọn' : 'phù hợp ' + Math.round(c.score * 100) + '%'}</div></div></div>`;
+      <div class="num"><b>${fmt(roundPrice(PICK[S.opt.pick].f(st) * f))}</b><div class="price-sub">P25–P75 ${fmt(st.p25 * f)} – ${fmt(st.p75 * f)}</div><div class="price-sub">${c.picked ? 'QS chọn' : c.learned ? 'đã học · ' + Math.round(c.score * 100) + '%' : 'phù hợp ' + Math.round(c.score * 100) + '%'}</div></div></div>`;
   }
   function renderDrawer(it) {
     const c = it.c || calc(it), o = S.opt;
@@ -718,7 +756,9 @@
       opt: { ...o, types: [...o.types], provs: [...o.provs] }, baseName: S.baseName, baseList: S.baseList,
       extra: S.extra.map(({ code, desc, ctx, unit, price, sheet }) => ({ code, desc, ctx, unit, price, sheet })),
       items: S.items.filter(it => (it.cands[it.sel] && it.cands[it.sel].picked) || (it.sel < 0 && it.cands.length) || isNum(it.manual) || isNum(it.baseManual) || it.skip || it.note)
-        .map(it => ({ id: it.id, gkey: it.sel >= 0 ? IX.groups[it.cands[it.sel].g].key : null, picked: !!(it.cands[it.sel] && it.cands[it.sel].picked), manual: it.manual, baseManual: it.baseManual, skip: it.skip, note: it.note })),
+        .map(it => ({ id: it.id, gkey: it.sel >= 0 ? IX.groups[it.cands[it.sel].g].key : null, picked: !!(it.cands[it.sel] && it.cands[it.sel].picked), manual: it.manual, baseManual: it.baseManual, skip: it.skip, note: it.note,
+          d: it.desc, u: it.unit, n: it.heads[it.heads.length - 1] || '', gn: it.sel >= 0 ? IX.groups[it.cands[it.sel].g].name : null, gu: it.sel >= 0 ? IX.groups[it.cands[it.sel].g].unit : null,
+          auto: it.auto >= 0 && it.sel >= 0 && it.auto !== it.cands[it.sel].g ? gref(it.auto) : null })),
     };
   }
   function saveSession() {
@@ -754,6 +794,7 @@
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.view.cur) closeDrawer(); });
     $$('.tab').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
     $('#save-sess').addEventListener('click', saveSession);
+    $('#save-learn').addEventListener('click', saveLearn);
     $('#dx-report').addEventListener('click', () => { try { exportReport(); } catch (ex) { console.error(ex); msg('Không xuất được báo cáo: ' + (ex.message || ex), 'err'); } });
     $('#dx-export').addEventListener('click', async () => {
       const btn = $('#dx-export'); btn.disabled = true; btn.textContent = 'Đang điền giá…';

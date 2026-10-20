@@ -11,7 +11,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="stylesheet" href="shared/gate.css">
 <link rel="stylesheet" href="shared/secure-ui.css">
-<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v=a9786bdd"><!--/DXG-->
+<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v=6c28e4e5"><!--/DXG-->
 </head>
 <body>
 <div id="splash">
@@ -171,10 +171,10 @@
         <span class="fname" id="n-base"></span>
       </label>
       <label class="drop small-drop" id="drop-sess">
-        <input type="file" id="f-sess" accept=".json,.dgbq">
-        <b>Mở phiên đã lưu</b>
-        <span class="btn pick">Mở phiên…</span>
-        <span class="muted small">Khôi phục nhóm đã chọn, giá tay, đơn giá bổ sung (.dgbq).</span>
+        <input type="file" id="f-sess" accept=".json,.dgbq,.dxgl">
+        <b>Mở phiên / dữ liệu học</b>
+        <span class="btn pick">Mở file…</span>
+        <span class="muted small">Phiên đã lưu (.dgbq): nhóm đã chọn, giá tay, đơn giá bổ sung. Dữ liệu học (.dxgl): các lần QS chọn nhóm, dùng để khớp đúng ngay.</span>
         <span class="fname" id="n-sess"></span>
       </label>
     </div>
@@ -211,6 +211,7 @@
       <button class="tab" data-tab="sum">Tổng hợp</button>
       <div class="spacer"></div>
       <button class="btn" id="save-sess" title="Lưu nhóm đã chọn, giá tay, đơn giá bổ sung để làm tiếp sau">Lưu phiên</button>
+      <button class="btn" id="save-learn" title="Lưu các lần QS chọn nhóm (cộng dồn với dữ liệu học đã nạp) để lần sau khớp đúng ngay">Lưu dữ liệu học</button>
       <button class="btn" id="dx-report" title="Báo cáo từng dòng: giá điền, P10–P90, lý do — file Excel riêng, không ghi vào BOQ">Xuất báo cáo Excel</button>
       <button class="btn primary" id="dx-export" title="Điền giá vào cột Đơn giá của chính file BOQ và tải về">Xuất Excel đã điền giá</button>
     </div>
@@ -240,6 +241,6 @@
   <div id="dw-body"></div>
 </aside></template><!--/DXG-->
 <script src="shared/crypto-web.js"></script>
-<script src="shared/secure.js" data-build="admin" data-scripts="shared/secure-ui.js,assets/xlsx-lite.js?v=7,assets/charts.js?v=7,assets/dash.js?v=7,assets/app.js?v=7,assets/dxg/pricing.js?v=a9786bdd,assets/dxg/xlsx-io.js?v=a9786bdd,assets/dxg/dxg-app.js?v=a9786bdd"></script>
+<script src="shared/secure.js" data-build="admin" data-scripts="shared/secure-ui.js,assets/xlsx-lite.js?v=7,assets/charts.js?v=7,assets/dash.js?v=7,assets/app.js?v=7,assets/dxg/pricing.js?v=6c28e4e5,assets/dxg/xlsx-io.js?v=6c28e4e5,assets/dxg/dxg-app.js?v=6c28e4e5"></script>
 </body>
 </html>
