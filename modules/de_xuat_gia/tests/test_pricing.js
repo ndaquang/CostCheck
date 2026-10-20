@@ -123,4 +123,48 @@ t('cấp độ bền B → mác M; mô tả ngắn dùng tiêu đề gần nhấ
   const v = DXG.match(IX, { desc: 'Móng', unit: 'm2', near: 'CÔNG TÁC VÁN KHUÔN', ctx: 'CÔNG TÁC VÁN KHUÔN' });
   assert.strictEqual(IX.groups[v[0].g].name, 'Ván khuôn móng');
 });
+t('từ đồng nghĩa / viết tắt ngành xây dựng', () => {
+  assert.deepStrictEqual(DXG.tokens('BT lót mác 150'), ['be', 'tong', 'lot', 'm', '150']);
+  assert.deepStrictEqual(DXG.tokens('Cốp pha cột'), DXG.tokens('Ván khuôn cột'));
+  assert.deepStrictEqual(DXG.tokens('Thép Φ10'), ['thep', 'd', '10']);
+  assert.deepStrictEqual(DXG.tokens('đường kính 10'), ['d', '10']);
+  assert.strictEqual(top('Cốp pha móng', 'm2').name, 'Ván khuôn móng');
+  assert.strictEqual(top('Formwork for footing', 'm2').name, 'Ván khuôn móng');
+  DXG.setSynonyms([['hố đào', 'đào móng']]);
+  assert.deepStrictEqual(DXG.tokens('hố đào'), ['dao', 'mong']);
+  DXG.setSynonyms();
+});
+t('học từ lựa chọn QS: nhớ đúng, gần đúng, nhóm bị bác', () => {
+  const IX2 = DXG.buildIndex(makeDB());
+  const g = n => IX2.groups.find(x => x.name === n);
+  const want = g('Đào đất móng bằng máy'), bad = g('Ván khuôn móng');
+  // mô tả lạ: trước khi học chỉ khớp yếu (không đủ tin cậy để điền)
+  const q = { desc: 'Công tác hố đào cơ giới khu A', unit: 'm3' };
+  const before = DXG.match(IX2, q);
+  assert.ok(!before.length || before[0].score < 0.5);
+  const r = DXG.applyLearn(IX2, { cap: [
+    { d: q.desc, u: 'm3', gk: want.key, gn: want.name, gu: want.unit },
+    { d: 'Cốp pha móng đơn', u: 'm2', gk: 'g999', gn: 'Ván khuôn móng', gu: 'm2', neg: [] },   // khóa cũ: tìm lại theo tên
+    { d: 'Nhóm đã bị xóa', u: 'm2', gk: 'gX', gn: 'Không còn', gu: 'm2' },
+  ] });
+  assert.deepStrictEqual([r.nhan, r.mat], [2, 1]);
+  const m = DXG.match(IX2, q);
+  assert.strictEqual(m[0].g, want.id); assert.strictEqual(m[0].learned, 'exact');
+  assert.strictEqual(DXG.confidence(m[0], DXG.groupStats(IX2, m[0].g, {}, 1)).level, 'cao');
+  // thứ tự từ khác vẫn là "nhớ đúng"; thêm 1 từ là "gần đúng"; khác con số thì không dùng
+  assert.strictEqual(DXG.match(IX2, { desc: 'Hố đào cơ giới khu A công tác', unit: 'm3' })[0].learned, 'exact');
+  const near = DXG.match(IX2, { desc: 'Công tác hố đào cơ giới khu A bằng máy', unit: 'm3' });
+  assert.strictEqual(near[0].g, want.id); assert.strictEqual(near[0].learned, 'near');
+  assert.ok(!DXG.match(IX2, { desc: 'Công tác hố đào cơ giới khu A2', unit: 'm3' }).some(c => c.learned));
+  assert.ok(DXG.match(IX2, { desc: 'Cốp pha móng đơn', unit: 'm2' })[0].g === bad.id);
+  // QS bác nhóm tự khớp → nhóm đó bị hạ điểm
+  const top0 = DXG.match(IX2, { desc: 'Bê tông móng M300', unit: 'm3' })[0];
+  const alt = g('Bê tông cột M300 đá 1x2');
+  DXG.applyLearn(IX2, { cap: [{ d: 'Bê tông móng M300', u: 'm3', gk: alt.key, gn: alt.name, gu: alt.unit, neg: [{ gk: IX2.groups[top0.g].key, gn: IX2.groups[top0.g].name, gu: IX2.groups[top0.g].unit }] }] });
+  const after = DXG.match(IX2, { desc: 'Bê tông móng M300', unit: 'm3' });
+  assert.strictEqual(after[0].g, alt.id);
+  assert.ok(after.find(c => c.g === top0.g).score < top0.score);
+  // tắt học
+  assert.strictEqual(DXG.match(IX2, { desc: 'Bê tông móng M300', unit: 'm3' }, { learn: false })[0].g, top0.g);
+});
 console.log(`\n${n} nhóm kiểm thử đạt.`);

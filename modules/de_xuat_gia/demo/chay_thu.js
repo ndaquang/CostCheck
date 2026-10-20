@@ -3,8 +3,8 @@
    Dùng:  node modules/de_xuat_gia/demo/chay_thu.js [thư mục kết quả]     (mặc định: demo/ket_qua)
           node modules/de_xuat_gia/demo/chay_thu.js --mo                  mở trang chạy thử để tự thao tác
    Sinh BOQ nhà xưởng mẫu (36 dòng) rồi chạy chay_file.js:
-     1. BOQ chưa có giá  → điền giá tốt nhất vào cột Đơn giá
-     2. BOQ đã có một phần giá QS → chỉ điền ô trống, giữ nguyên giá QS */
+     1. BOQ chưa có giá  → giá tốt nhất vào cột riêng "ĐƠN GIÁ ĐỀ XUẤT (CSDL)" tô màu
+     2. BOQ đã có một phần giá QS → giá QS giữ nguyên ở cột Đơn giá, giá đề xuất ở cột riêng để so sánh */
 const fs = require('fs'), path = require('path'), http = require('http');
 const { execFileSync } = require('child_process');
 

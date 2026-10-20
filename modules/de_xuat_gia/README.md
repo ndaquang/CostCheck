@@ -1,6 +1,6 @@
 # Module Điền giá BOQ
 
-Module lấy **giá tốt nhất** từ CSDL đơn giá (gói `.dgbw`, dùng chung với app Tra cứu) và **điền thẳng vào cột Đơn giá của file BOQ**.
+Module lấy **giá tốt nhất** từ CSDL đơn giá (gói `.dgbw`, dùng chung với app Tra cứu) và ghi vào file BOQ. Mặc định giá nằm ở **một cột riêng "ĐƠN GIÁ ĐỀ XUẤT (CSDL)" được tô màu**, tách khỏi giá QS trong cột Đơn giá.
 
 ## Vị trí trong phần mềm
 Module là mục **"Điền giá BOQ"** trên thanh điều hướng của app Tra cứu đơn giá, cạnh Tra cứu / Điểm rơi giá / Phân tích. **Chỉ tài khoản admin thấy mục này.** Module dùng chung lần đăng nhập và CSDL đã nạp của app, không cần đăng nhập lại.
@@ -16,15 +16,29 @@ Trên giao diện có các nút:
 - **Nhập Excel BOQ…**: file cần điền giá.
 - **Nhập Excel đơn giá…**: đơn giá bổ sung.
 - **Nhập Excel baseline…**
-- **Xuất Excel đã điền giá**: BOQ gốc được điền giá vào cột Đơn giá.
+- **Xuất Excel đã điền giá**: BOQ gốc kèm cột giá đề xuất tô màu (hoặc giá điền vào cột Đơn giá, tùy tùy chọn "Ghi giá vào").
 - **Xuất báo cáo Excel**: file riêng gồm sheet Tóm tắt và Chi tiết từng dòng.
 
 ## Nguyên tắc
-- **Không thêm sheet, không thêm cột.** Phần mềm chỉ ghi số vào ô Đơn giá đang trống. Style ô, ô gộp, độ rộng cột, vùng in, liên kết ngoài và mọi công thức sẵn có đều giữ nguyên.
-- Ô đã có giá, ô công thức, ô chữ không bao giờ bị ghi. Muốn ghi đè ô đã có giá thì bật tùy chọn "Ghi đè ô đã có giá".
-- Ô Thành tiền đang trống (không giá trị, không công thức) được điền công thức `= KL × Đơn giá` của cùng dòng, kèm giá trị lưu sẵn. Nhờ vậy tổng biểu và sheet Tổng hợp tự cộng. Có thể tắt tùy chọn này.
+Tùy chọn **"Ghi giá vào"** có hai cách:
+
+**Cột riêng "Đơn giá đề xuất" (mặc định)**: giá đề xuất không trộn với giá khác.
+- Phần mềm thêm **một cột** ngay sau cột cuối của bảng (sau mọi cột có dữ liệu như Ghi chú, Baseline, và sau ô gộp). Tiêu đề cột là **"ĐƠN GIÁ ĐỀ XUẤT (CSDL)"** kèm cách chọn giá (vd "P25"), nền cam đậm. Mỗi ô giá có nền vàng và định dạng `#,##0`.
+- Cột Đơn giá, Thành tiền, công thức, tổng cộng và giá QS có sẵn **giữ nguyên**. Dòng đã có giá QS vẫn có giá đề xuất ở cột riêng để so sánh. Dòng không có đề xuất để trống ô.
+- Không thêm sheet. Vùng in giữ nguyên, nên cột đề xuất là cột làm việc nằm ngoài vùng in.
+- Nạp lại file đã xuất: cột đề xuất được nhận ra, không bị nhầm là cột Đơn giá. Lần xuất sau ghi lại vào đúng cột đó, không thêm cột mới.
+- Mỗi lần xuất đều ghi lên **file BOQ gốc**. Giá của các lần xuất trước (cách khác, tùy chọn khác) không lẫn vào file mới.
+
+**Ô Đơn giá đang trống**: cách cũ, không thêm sheet hay cột.
+- Phần mềm chỉ ghi số vào ô Đơn giá đang trống. Ô đã có giá, ô công thức, ô chữ không bị ghi, trừ khi bật "Ghi đè ô đã có giá".
+- Ô Thành tiền đang trống được điền công thức `= KL × Đơn giá` cùng dòng, kèm giá trị lưu sẵn, để tổng biểu tự cộng. Có thể tắt.
 - File được đặt cờ để Excel tính lại khi mở (`fullCalcOnLoad`). Đây là thay đổi duy nhất trong `workbook.xml`.
-- `tests/verify_fill.py` kiểm tra file xuất chỉ khác file gốc ở đúng các ô vừa điền (trước đó trống, giữ nguyên style). Mọi phần khác giống hệt từng byte.
+
+Cả hai cách đều giữ nguyên style ô, ô gộp, độ rộng các cột có sẵn, vùng in, liên kết ngoài và mọi công thức. `tests/verify_fill.py` kiểm tra file xuất chỉ khác file gốc ở đúng các ô phần mềm ghi:
+- ô trống được điền, giữ nguyên style;
+- hoặc ô thuộc cột đề xuất, trong file gốc không có dữ liệu.
+
+`styles.xml` chỉ được thêm style mới. Mọi phần khác giống hệt từng byte.
 
 ## Chọn giá "tốt nhất"
 | Tùy chọn | Ý nghĩa |
@@ -42,12 +56,42 @@ Trên giao diện có các nút:
 ## Làm kết quả chính xác hơn
 - **Đơn giá bổ sung:** nạp thêm file Excel có cột Mô tả, Đơn vị, Đơn giá (báo giá NCC, BOQ đã chốt giá, bảng giá mới…). Các giá này được thêm vào CSDL của phiên làm việc và **ưu tiên khi khớp**. Nạp được nhiều file, và chúng được lưu cùng phiên (`.dgbq`).
 - **Cập nhật CSDL chung:** đưa báo giá mới vào dữ liệu nguồn của app Tra cứu rồi dựng lại gói `.dgbw`. Module dùng ngay gói mới.
+- **Dữ liệu học (.dxgl):** mỗi lần QS chọn nhóm đúng cho một dòng (trong ngăn chi tiết), bấm **Lưu dữ liệu học**. Lần sau mở file `.dxgl` ở ô "Mở phiên / dữ liệu học": mô tả đã gặp khớp đúng ngay nhóm QS chọn (độ khớp Cao), mô tả gần giống được ưu tiên nhóm đó, nhóm QS đã bác bị hạ điểm. Xem mục **Train khớp và làm sạch dữ liệu** bên dưới.
+
+## Train khớp và làm sạch dữ liệu
+
+Phần mềm không dùng mô hình AI "hộp đen": khớp theo từ (IDF), từ đồng nghĩa ngành xây dựng và **bộ nhớ các lần QS xác nhận**. Muốn tỉ lệ khớp cao và giá đáng tin, làm theo 3 bước, lặp lại sau mỗi đợt BOQ:
+
+**1. Làm sạch CSDL đơn giá** — lỗi dữ liệu vừa làm khớp sai vừa làm lệch P25/P50.
+```
+node modules/de_xuat_gia/hoc/lam_sach.js --db data/db.js --out ket_qua_lam_sach [--sua db_sach.js] [--gan-nhom]
+```
+Báo cáo `BAO_CAO_LAM_SACH.xlsx` liệt kê: giá không hợp lệ, dòng trùng hệt, ngoại lai chưa đánh dấu, đơn vị lạ, lệch đơn vị trong nhóm, nhóm phân tán lớn (đang gộp nhiều quy cách), nhóm trùng nhau, mô tả không rõ ("Tổng cộng" nhập nhầm), dòng chưa có nhóm (kèm nhóm gợi ý), dòng có thể sai nhóm. `--sua` ghi **bản CSDL mới** đã bỏ dòng trùng / giá 0 và đánh dấu ngoại lai (không xóa); `--gan-nhom` gán thêm nhóm cho dòng chưa có nhóm khi gợi ý rất chắc (≥ 0,85, cùng đơn vị). CSDL gốc không bị sửa. Các lỗi còn lại sửa trong dữ liệu nguồn của app Tra cứu rồi dựng lại gói `.dgbw`.
+
+**2. Thu thập lựa chọn của QS** — nguồn "dữ liệu train", càng nhiều càng tốt:
+- phiên làm việc `.dgbq` (lưu từ trang Điền giá: các dòng QS đã chọn nhóm);
+- file `.dxgl` (nút **Lưu dữ liệu học**);
+- file Excel QS tự lập: cột **Mô tả | Đơn vị | Tiêu đề hạng mục** (không bắt buộc) **| Nhóm đúng** (tên nhóm đại diện trong CSDL). Mẫu: `python modules/de_xuat_gia/hoc/tao_cap_mau.py <thư mục>`;
+- (không bắt buộc) file từ đồng nghĩa: cột **Từ | Nghĩa chuẩn** (vd "cốp pha" → "ván khuôn").
+
+**3. Train và đo tỉ lệ khớp**
+```
+node modules/de_xuat_gia/hoc/hoc.js --db data/db.js --cap CapKhop.xlsx --phien a.dgbq --phien b.dgbq \
+     [--mo-hinh cu.dxgl] [--dong-nghia DongNghia.xlsx] [--boq-gia BOQ_da_chot_gia.xlsx] --out ket_qua_hoc
+```
+Kết quả:
+- `hoc_khop.dxgl`: nạp vào trang Điền giá BOQ (ô "Mở phiên / dữ liệu học"). Lần sau truyền lại bằng `--mo-hinh` để cộng dồn.
+- `BAO_CAO_HOC.xlsx`: Top-1 / Top-3, tỉ lệ điền, độ chính xác khi điền, **tỉ lệ điền sai**, theo 3 trường hợp: trước khi học, mô tả mới (kiểm tra chéo: mô tả đem thử chưa có trong dữ liệu học, ước lượng đúng cho BOQ mới), mô tả đã gặp. Có ngưỡng "Chỉ điền khi khớp ≥" khuyến nghị (mức điền nhiều nhất mà vẫn đúng ≥ 95%, cần ≥ 100 cặp mới hạ ngưỡng), danh sách dòng khớp sai, **gợi ý từ đồng nghĩa** để QS duyệt, và (với `--boq-gia`) độ lệch giá tham khảo so với giá chốt thật.
+
+Lưu ý: CSDL dựng lại có thể đổi mã nhóm; dữ liệu học tìm lại nhóm theo tên + đơn vị. Đổi tên nhóm trong CSDL thì cặp cũ báo "không còn nhóm" — sửa tên trong file cặp khớp rồi train lại.
+
+Khớp có sẵn (không cần train): viết tắt / đồng nghĩa (BT, BTCT, BTTP, cốp pha ↔ ván khuôn, mác 300 → M300, Φ10 / phi 10 / đường kính 10 → D10, gạch ống ↔ gạch rỗng, WC ↔ vệ sinh, nội thất ↔ trong nhà…), thuật ngữ BOQ tiếng Anh thường gặp (concrete, formwork, rebar, plastering, waterproofing…); bỏ các cụm động từ chung ("sản xuất lắp dựng", "tháo dỡ", "gia công") để không lấn át từ phân biệt như móng / cột / dầm.
 
 ## Quy trình
 1. Nạp BOQ, có thể kèm đơn giá bổ sung và baseline.
-2. Kiểm tra cấu trúc. Chú ý **cột Đơn giá**, vì đây là cột sẽ được điền.
+2. Kiểm tra cấu trúc: cột Mô tả, Đơn vị, Khối lượng, Đơn giá (giá QS có sẵn; là cột được điền nếu chọn "Ghi giá vào: Ô Đơn giá đang trống").
 3. Bấm **Tính giá điền**, xem từng dòng: Sẽ điền / Giữ giá có sẵn / Không điền và lý do.
-4. Bấm **Điền giá vào BOQ & tải về**. File nhận được là `<tên>_DaDienGia.xlsx`.
+4. Bấm **Xuất Excel đã điền giá**. File nhận được là `<tên>_DaDienGia.xlsx`, giá đề xuất ở cột riêng tô màu.
 5. **Lưu phiên** để làm tiếp lần sau.
 
 Baseline (nếu nạp) chỉ dùng để so sánh trên màn hình, không ghi vào BOQ.
@@ -74,6 +118,7 @@ modules/de_xuat_gia/
   assets/xlsx-io.js     đọc .xlsx, điền giá bằng cách sửa đúng ô trong XML, không ghi lại cả sheet (không cần thư viện ngoài)
   assets/dxg-app.js     giao diện, tính giá điền, điền vào BOQ, đơn giá bổ sung, lưu phiên
   assets/dxg.css
+  hoc/                  công cụ chạy bằng Node: lam_sach.js (soát / sửa CSDL), hoc.js (train + đo tỉ lệ khớp), tao_cap_mau.py
   tests/                dữ liệu giả lập + kiểm thử
 ```
 
@@ -91,10 +136,12 @@ Dữ liệu chạy thử gồm CSDL giả lập (khoảng 500 báo giá, 40 nhó
 Chạy trên một file BOQ bất kỳ (BOQ thật):
 
 ```
-node modules/de_xuat_gia/demo/chay_file.js --boq <file.xlsx> [--extra <đơn giá bổ sung.xlsx> ...] [--baseline <file.xlsx>] [--db <db.js>] [--pick p25|p10|med|latest] [--out <thư mục>]
+node modules/de_xuat_gia/demo/chay_file.js --boq <file.xlsx> [--extra <đơn giá bổ sung.xlsx> ...] [--baseline <file.xlsx>] [--db <db.js>] [--pick p25|p10|med|latest] [--mode col|rate] [--out <thư mục>]
 ```
 
-Kết quả gồm file `<tên>_DaDienGia.xlsx` (BOQ đã điền giá) và báo cáo **riêng** `KET_QUA.xlsx` (sheet Tóm tắt, Đọc file, Chi tiết từng dòng: giá điền, P10–P90, lý do điền/không điền). Mặc định so với CSDL giả lập. Muốn có giá tham khảo thật thì truyền `--db` là CSDL thật dạng `window.DB = {...}`, hoặc dùng trang web với gói `.dgbw`.
+Thêm `--mode rate` để điền vào ô Đơn giá thay cho cột riêng.
+
+Kết quả gồm file `<tên>_DaDienGia.xlsx` (BOQ có cột giá đề xuất) và báo cáo **riêng** `KET_QUA.xlsx` (sheet Tóm tắt, Đọc file, Chi tiết từng dòng: giá điền, P10–P90, lý do điền/không điền). Mặc định so với CSDL giả lập. Muốn có giá tham khảo thật thì truyền `--db` là CSDL thật dạng `window.DB = {...}`, hoặc dùng trang web với gói `.dgbw`.
 
 ### Các mẫu BOQ thật đã xử lý
 - Dòng có chữ "Ghi chú" ở cột Đơn vị, đoạn thuyết minh dài, dòng "......" được bỏ qua: không phải hạng mục, cũng không phải tiêu đề.
@@ -108,9 +155,11 @@ Kết quả gồm file `<tên>_DaDienGia.xlsx` (BOQ đã điền giá) và báo 
 ## Kiểm thử
 
 ```
-node modules/de_xuat_gia/tests/test_pricing.js          # lõi: khớp, đơn vị, bộ lọc, nhận diện cột, baseline
-node modules/de_xuat_gia/tests/e2e.js <thư mục tạm>      # Chromium + LibreOffice: điền giá P25, chỉ ô trống thay đổi,
-                                                         # Thành tiền/Tổng tính lại, giữ giá QS có sẵn, đơn giá bổ sung, phiên
+node modules/de_xuat_gia/tests/test_pricing.js          # lõi: khớp, đơn vị, bộ lọc, nhận diện cột, baseline, từ đồng nghĩa, dữ liệu học
+node modules/de_xuat_gia/tests/test_hoc.js <thư mục tạm> # làm sạch CSDL (dữ liệu bẩn giả lập) + train khớp (cặp Excel, phiên, mô hình cũ)
+node modules/de_xuat_gia/tests/e2e.js <thư mục tạm>      # Chromium + LibreOffice: cột giá đề xuất riêng tô màu (cột Đơn giá không đổi,
+                                                         # nạp lại file đã xuất), điền vào ô trống + Thành tiền/Tổng tính lại,
+                                                         # giữ giá QS có sẵn, đơn giá bổ sung, phiên, dữ liệu học
 node modules/de_xuat_gia/tests/e2e_gate.js <thư mục tạm> # app đã dựng (docs/): mục Điền giá BOQ trong app, CSP + đăng nhập, admin / nhân viên
 python modules/de_xuat_gia/tests/verify_fill.py <BOQ gốc> <file đã điền>  # chỉ các ô trống được điền, mọi thứ khác giữ nguyên
 ```
@@ -119,7 +168,7 @@ Mọi dữ liệu trong `tests/` là giả lập.
 
 ## Hướng phát triển
 
-1. **Học từ lựa chọn của QS**: lưu cặp "mô tả BOQ → nhóm tham khảo QS chọn" để lần sau khớp đúng ngay.
+1. ~~Học từ lựa chọn của QS~~: đã có (dữ liệu học `.dxgl`, công cụ `hoc/`). Tiếp theo: lưu dữ liệu học dùng chung cho cả nhóm QS thay vì từng file.
 2. **Khớp theo thuộc tính kỹ thuật**: tách mác, đường kính, chiều dày, cấu kiện; nhóm sai thông số chính thì loại hẳn thay vì chỉ trừ điểm.
 3. **Chỉ số giá theo vùng và thời gian** (thép, xi măng, cát đá) thay cho một hệ số chung.
 4. **Nạp giá chốt hoặc trúng thầu** về CSDL, rồi đo độ lệch giữa giá tham khảo và giá chốt để biết nhóm nào cần thêm dữ liệu.

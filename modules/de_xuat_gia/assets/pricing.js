@@ -27,7 +27,45 @@
     if (!/b[eê]\s*t[oô]ng|\bbt\b|concrete/i.test(t.normalize('NFC'))) return t;
     return t.replace(/\bB\s?(7[.,]5|10|12[.,]5|15|20|22[.,]5|25|27[.,]5|30|35|40)\b/gi, (m, x) => `M${B2M[x.replace(',', '.')]}`);
   }
-  const tokens = s => norm(concreteClass(s)).split(' ').filter(t => t && !STOP.has(t));
+  // Từ đồng nghĩa / viết tắt ngành xây dựng (viết dạng đã chuẩn hóa), áp cho cả CSDL lẫn mô tả BOQ để hai bên nói cùng một "ngôn ngữ"
+  const SYN0 = [
+    ['btct', 'be tong cot thep'], ['bttp', 'be tong thuong pham'], ['bt', 'be tong'],
+    ['cop pha', 'van khuon'], ['coppha', 'van khuon'], ['copha', 'van khuon'], ['cofa', 'van khuon'], ['coffa', 'van khuon'], ['vk', 'van khuon'],
+    // cụm động từ thi công chung chung: bỏ khi so khớp ("sản xuất" bỏ dấu thành "san" = sàn; "lắp dựng / tháo dỡ" lấn át "móng / cột")
+    ['sxld', ''], ['sx ld', ''], ['san xuat', ''], ['lap dung', ''], ['thao do', ''], ['gia cong', ''], ['sx', ''],
+    ['kct', 'ket cau thep'],
+    ['vxm', 'vua xi mang'], ['xm', 'xi mang'], ['wc', 've sinh'], ['gach ong', 'gach rong'],
+    ['concrete', 'be tong'], ['rebar', 'cot thep'], ['reinforcement', 'cot thep'], ['formwork', 'van khuon'], ['shuttering', 'van khuon'],
+    ['excavation', 'dao dat'], ['backfill', 'dap dat'], ['backfilling', 'dap dat'], ['plastering', 'trat'], ['plaster', 'trat'],
+    ['painting', 'son'], ['paint', 'son'], ['ceiling', 'tran'], ['gypsum', 'thach cao'], ['waterproofing', 'chong tham'],
+    ['brickwork', 'xay gach'], ['masonry', 'xay'], ['footing', 'mong'], ['foundation', 'mong'], ['column', 'cot'], ['columns', 'cot'],
+    ['beam', 'dam'], ['beams', 'dam'], ['slab', 'san'], ['slabs', 'san'], ['railing', 'lan can'], ['handrail', 'lan can'],
+    ['tiling', 'gach'], ['tiles', 'gach'], ['tile', 'gach'], ['steel', 'thep'], ['pile', 'coc'], ['piles', 'coc'], ['piling', 'coc'],
+    ['stainless steel', 'inox'], ['stainless', 'inox'], ['ready mix', 'thuong pham'], ['ready mixed', 'thuong pham'],
+    ['noi that', 'trong nha'], ['ngoai that', 'ngoai nha'], ['internal', 'trong'], ['interior', 'trong nha'], ['external', 'ngoai'], ['exterior', 'ngoai nha'],
+    ['moisture resistant', 'chong am'], ['concealed frame', 'khung chim'], ['cementitious', 'goc xi mang'], ['roof', 'mai'], ['roofing', 'lop mai'],
+    ['machine', 'may'], ['door', 'cua di'], ['window', 'cua so'], ['wall', 'tuong'], ['walls', 'tuong'], ['floor', 'nen'], ['flooring', 'lat nen'],
+    ['porcelain', 'granite'], ['xa ban', 'phe thai'], ['ba bot', 'ba matit'], ['matic', 'matit'],
+  ];
+  // Biến đổi theo mẫu: "mác 300" → M300, "đường kính 10" / "Φ10" / "phi 10" → D10, "1*2" → 1x2
+  const PAT = [[/ mac (?=\d)/g, ' m '], [/ (duong kinh|dk|phi|fi) (?=\d)/g, ' d ']];
+  let SYN = [];
+  function compileSyn(list) {
+    return list.map(([a, b]) => [norm(a), norm(b)]).filter(([a, b]) => a && a !== b)   // b rỗng = bỏ cụm từ
+      .sort((x, y) => y[0].length - x[0].length)
+      .map(([a, b]) => [new RegExp(' ' + a + '(?= )', 'g'), b ? ' ' + b : '']);
+  }
+  // Thêm từ đồng nghĩa của người dùng / học được ([[từ, nghĩa chuẩn], …]); gọi trước buildIndex
+  function setSynonyms(list = []) { SYN = compileSyn([...SYN0, ...list]); }
+  setSynonyms();
+  function canon(n) {
+    let s = ' ' + n + ' ';
+    for (const [re, r] of PAT) s = s.replace(re, r);
+    for (const [re, r] of SYN) s = s.replace(re, r);
+    return s.trim();
+  }
+  const prepDims = s => String(s).replace(/(\d)\s*[*×]\s*(?=\d)/g, '$1x').replace(/[Φφø∅]\s*(?=\d)/g, ' D');
+  const tokens = s => s === null || s === undefined ? [] : canon(norm(concreteClass(prepDims(s)))).split(' ').filter(t => t && !STOP.has(t));
   // Thông số có tiền tố: mác M300, đường kính D10, cấp độ bền B20, thép CB300 → { m: Set(300), d: Set(10) }
   function attrNums(tk) {
     const out = {};
@@ -49,7 +87,10 @@
     ['lit', /^(lit|l|lit)$/],
     ['cong', /^(cong|ngay cong|manday|md cong)$/],
     ['thang', /^(thang|month|months)$/],
+    ['ngay', /^(ngay|day|days)$/], ['ca', /^(ca|ca may|shift)$/], ['chuyen', /^(chuyen|chuyen xe|trip|trips)$/],
+    ['cuon', /^(cuon|roll|rolls)$/], ['bao', /^(bao|bag|bags)$/], ['km', /^(km|kilomet)$/],
   ];
+  const UNIT_BASES = new Set(UNIT_ALIAS.map(([b]) => b === 'tan' ? 'kg' : b));
   // -> { base: 'm2', factor: 100 } (vd: "100m2" = 100 lần m2); base = norm(u) nếu không nhận ra
   function parseUnit(u) {
     let n = norm(u);
@@ -224,7 +265,10 @@
       }
       for (const gid of tt) { if (acc[gid] === 0) touched.push(gid); acc[gid] += tmp[gid]; tmp[gid] = 0; }
     }
-    if (!touched.length) return [];
+    if (!touched.length) {   // không từ nào khớp CSDL: vẫn dùng được mô tả QS đã dạy
+      const o = []; if (IX.mem && opt.learn !== false) applyMemory(IX, line, o);
+      return o.sort((a, b) => b.score - a.score).slice(0, limit);
+    }
     let mx = 0; for (const gid of touched) if (acc[gid] > mx) mx = acc[gid];
     let cand = touched.filter(gid => acc[gid] >= mx * 0.35).map(gid => [gid, acc[gid]]);
     for (const gid of touched) acc[gid] = 0;
@@ -270,8 +314,109 @@
       if (g.boost) score *= g.boost;   // vd đơn giá bổ sung của người dùng
       out.push({ g: gid, score: Math.min(1, score), cover, prec, unitOk, ratio: ratio === null ? 1 : ratio });
     }
+    if (IX.mem && opt.learn !== false) applyMemory(IX, line, out);
     out.sort((a, b) => b.score - a.score);
     return out.slice(0, limit);
+  }
+
+  /* ---------- Học từ lựa chọn của QS ---------- */
+  // Mô hình học (.dxgl): { dinh_dang: 'DXGL1', cap: [{ d, u, n, gk, gn, gu, neg: [{gk, gn, gu}], so }], dong_nghia: [[từ, nghĩa]] }
+  // d/u/n: mô tả, đơn vị, tiêu đề gần nhất của dòng BOQ; gk/gn/gu: khóa, tên, đơn vị nhóm QS chọn; neg: nhóm QS đã bác.
+  const isShort = d => tokens(d).length <= 4;
+  // Khóa nhớ: các từ của mô tả (không phụ thuộc thứ tự) + đơn vị; mô tả ngắn ("Móng") thêm tiêu đề gần nhất
+  function learnKey(desc, unit, near) {
+    const k = [...new Set(tokens(desc))].sort().join(' ') + '|' + parseUnit(unit).base;
+    return isShort(desc) && near ? k + '|' + [...new Set(tokens(near))].sort().join(' ') : k;
+  }
+  // Tìm nhóm theo khóa (cùng tên), rồi theo tên + đơn vị (CSDL dựng lại có thể đổi mã nhóm)
+  function resolveGroup(IX, gk, gn, gu) {
+    if (!IX._gByKey) {
+      IX._gByKey = new Map(IX.groups.map(g => [g.key, g]));
+      IX._gByName = new Map();
+      for (const g of IX.groups) { const k = norm(g.name) + '|' + parseUnit(g.unit).base; if (!IX._gByName.has(k)) IX._gByName.set(k, g); }
+    }
+    const g = IX._gByKey.get(gk);
+    if (g && (!gn || norm(g.name) === norm(gn))) return g;
+    return IX._gByName.get(norm(gn) + '|' + parseUnit(gu).base) || null;
+  }
+  // Nạp mô hình học vào chỉ mục. -> { nhan: số cặp dùng được, mat: số cặp không còn nhóm trong CSDL }
+  function applyLearn(IX, model) {
+    IX.mem = new Map(); IX.memList = []; IX.memTok = new Map();
+    let nhan = 0, mat = 0;
+    for (const c of (model && model.cap) || []) {
+      const g = resolveGroup(IX, c.gk, c.gn, c.gu);
+      if (!g) { mat++; continue; }
+      nhan++;
+      const key = learnKey(c.d, c.u, c.n);
+      let e = IX.mem.get(key);
+      if (!e) {
+        const tk = new Set(tokens(c.d).concat(isShort(c.d) ? tokens(c.n) : []));
+        e = { key, votes: new Map(), neg: new Set(), tk, nums: [...tk].filter(t => /^\d/.test(t)).sort().join(' '), ub: parseUnit(c.u).base };
+        IX.mem.set(key, e); IX.memList.push(e);
+        for (const t of tk) { let a = IX.memTok.get(t); if (!a) IX.memTok.set(t, a = []); a.push(e); }
+      }
+      e.votes.set(g.id, (e.votes.get(g.id) || 0) + (c.so || 1));
+      for (const x of c.neg || []) { const ng = resolveGroup(IX, x.gk, x.gn, x.gu); if (ng && ng.id !== g.id) e.neg.add(ng.id); }
+    }
+    for (const e of IX.memList) {
+      let best = -1, bv = 0, tot = 0;
+      for (const [gid, v] of e.votes) { tot += v; if (v > bv) { bv = v; best = gid; } }
+      e.gid = best; e.agree = bv / tot;   // các QS chọn khác nhau cho cùng mô tả → tin ít hơn
+      for (const gid of e.votes.keys()) if (gid !== best) e.neg.delete(gid);
+    }
+    if (!IX.memList.length) IX.mem = null;
+    return { nhan, mat, mau: IX.memList.length };
+  }
+  // Cộng dồn hai mô hình học: cùng mô tả + cùng nhóm thì cộng số lần chọn, gộp các nhóm bị bác
+  function mergeLearn(a = {}, b = {}) {
+    const map = new Map(), out = { dinh_dang: 'DXGL1', cap: [], dong_nghia: [] };
+    for (const c of [...(a.cap || []), ...(b.cap || [])]) {
+      const k = learnKey(c.d, c.u, c.n) + '#' + norm(c.gn) + '|' + parseUnit(c.gu).base;
+      const x = map.get(k);
+      if (!x) { const y = { ...c, neg: [...(c.neg || [])], so: c.so || 1 }; map.set(k, y); out.cap.push(y); continue; }
+      x.so += c.so || 1; x.gk = c.gk;
+      for (const n of c.neg || []) if (!x.neg.some(m => norm(m.gn) === norm(n.gn))) x.neg.push(n);
+    }
+    const seen = new Set();
+    for (const p of [...(a.dong_nghia || []), ...(b.dong_nghia || [])]) { const k = p.map(norm).join('>'); if (!seen.has(k)) { seen.add(k); out.dong_nghia.push(p); } }
+    return out;
+  }
+  function addCand(IX, line, out, gid, score, learned) {
+    let c = out.find(x => x.g === gid);
+    if (!c) {
+      const g = IX.groups[gid], ratio = line.unit ? unitRatio(g.unit, line.unit) : null;
+      c = { g: gid, score: 0, cover: 1, prec: 1, unitOk: line.unit ? ratio !== null : null, ratio: ratio === null ? 1 : ratio };
+      out.push(c);
+    }
+    if (c.unitOk === false) return;
+    if (score > c.score) { c.score = score; c.learned = learned; }
+  }
+  function applyMemory(IX, line, out) {
+    const e = IX.mem.get(learnKey(line.desc, line.unit, line.near));
+    if (e) {
+      for (const c of out) if (e.neg.has(c.g)) c.score *= 0.6;
+      addCand(IX, line, out, e.gid, 0.9 + 0.08 * e.agree, 'exact');
+      return;
+    }
+    // Gần đúng: mô tả đã học rất giống (Jaccard theo IDF ≥ 0.8: từ phân biệt như "trong"/"ngoài" nặng hơn từ phổ biến),
+    // cùng đơn vị, cùng các con số (M300 ≠ M350)
+    const tk = new Set(tokens(line.desc).concat(isShort(line.desc) ? tokens(line.near) : []));
+    const nums = [...tk].filter(t => /^\d/.test(t)).sort().join(' '), ub = parseUnit(line.unit).base;
+    const seen = new Set(), maxIdf = Math.log(1 + IX.NG) * 1.15;
+    const w = t => IX.idf.get(t) || maxIdf;   // từ CSDL không có: coi là rất phân biệt
+    let wq = 0; for (const t of tk) wq += w(t);
+    let best = null, bj = 0;
+    for (const t of tk) for (const m of IX.memTok.get(t) || []) {
+      if (seen.has(m)) continue; seen.add(m);
+      if (m.nums !== nums || (ub && m.ub && m.ub !== ub)) continue;
+      let inter = 0, wm = 0; for (const x of m.tk) { wm += w(x); if (tk.has(x)) inter += w(x); }
+      const j = inter / (wq + wm - inter);
+      if (j > bj) { bj = j; best = m; }
+    }
+    if (best && bj >= 0.8) {
+      for (const c of out) if (best.neg.has(c.g)) c.score *= 0.8;
+      addCand(IX, line, out, best.gid, (0.55 + 0.35 * bj) * (0.7 + 0.3 * best.agree), 'near');
+    }
   }
 
   /* ---------- Thống kê giá nhóm theo bộ lọc ---------- */
@@ -330,7 +475,7 @@
   // Độ tin cậy: điểm khớp × độ đủ mẫu × độ phân tán
   function confidence(m, st) {
     if (!m) return { level: 'none', value: 0 };
-    let v = m.score;
+    let v = m.learned === 'exact' ? Math.max(m.score, 0.98) : m.score;   // QS đã xác nhận đúng mô tả này
     if (st) {
       v *= st.n >= 5 ? 1 : st.n >= 3 ? 0.93 : st.n === 2 ? 0.8 : 0.62;   // 1 báo giá thì không bao giờ 'cao'
       if (st.med > 0 && st.n >= 3) { const disp = (st.p75 - st.p25) / st.med; if (disp > 0.8) v *= 0.85; }
@@ -364,7 +509,9 @@
     }
     return best;
   }
+  const PROP_HEAD = 'ĐƠN GIÁ ĐỀ XUẤT (CSDL)', PROP_RE = /\bde xuat csdl\b/;
   // grid: mảng 2 chiều giá trị ô (chuỗi/số/null). -> { headerRow, cols: {key: colIndex}, dataStart }
+  //   cols.prop: cột giá đề xuất phần mềm đã thêm ở lần xuất trước (nếu có) — lần xuất sau ghi lại vào đúng cột đó
   function detectColumns(grid, maxScan = 40) {
     let best = null;
     for (let r = 0; r < Math.min(grid.length, maxScan); r++) {
@@ -376,6 +523,8 @@
       const cols = {}, score = {};
       for (let c = 0; c < Math.max(row.length, next.length); c++) {
         const txt = [row[c], typeof next[c] === 'string' ? next[c] : ''].filter(v => typeof v === 'string').join(' ');
+        // cột "ĐƠN GIÁ ĐỀ XUẤT (CSDL)" do chính phần mềm thêm ở lần xuất trước: không phải cột đơn giá của BOQ
+        if (PROP_RE.test(norm(txt))) { if (cols.prop === undefined) cols.prop = c; continue; }
         for (const key of Object.keys(COLS)) {
           let s = headerScore(txt, key);
           if (!s) continue;
@@ -399,7 +548,7 @@
     if (!best) return null;
     // Cột trùng nhau: ưu tiên mô tả/đơn vị/khối lượng
     const used = new Set();
-    for (const k of ['desc', 'unit', 'qty', 'rate', 'amount', 'code', 'mat', 'lab', 'base', 'note']) {
+    for (const k of ['prop', 'desc', 'unit', 'qty', 'rate', 'amount', 'code', 'mat', 'lab', 'base', 'note']) {
       if (best.cols[k] === undefined) continue;
       if (used.has(best.cols[k])) delete best.cols[k]; else used.add(best.cols[k]);
     }
@@ -525,5 +674,5 @@
     return { d, pct: baseline ? d / baseline : null, amt: isNum(qty) ? d * qty : null };
   }
 
-  return { norm, tokens, parseUnit, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, diff, toNum, COLS };
+  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, diff, toNum, COLS, PROP_HEAD };
 });
