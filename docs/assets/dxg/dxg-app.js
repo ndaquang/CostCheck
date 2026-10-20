@@ -49,7 +49,7 @@
   /* ---------- Nhúng trong app tra cứu: mục "Điền giá BOQ" trên thanh điều hướng (chỉ admin) ---------- */
   function bootEmbed() {
     const ds = new URLSearchParams(location.search).get('ds');
-    if (!ADMIN || ds === 'doithu') return;   // nhân viên / dữ liệu đối thủ: không có mục này
+    if (!ADMIN || ds === 'ctg' || ds === 'doithu') return;   // nhân viên / bộ dữ liệu riêng (CTG, đối thủ): không có mục này
     const sec = document.createElement('section');
     sec.id = 'sec-dxg'; sec.hidden = true;
     sec.appendChild(document.getElementById('dxg-tpl').content.cloneNode(true));
@@ -59,7 +59,7 @@
     if (nav) {
       const a = document.createElement('a');
       a.href = '#'; a.dataset.sec = 'dien-gia'; a.textContent = 'Điền giá BOQ'; a.title = 'Điền giá từ CSDL vào file BOQ Excel (admin)';
-      nav.insertBefore(a, nav.querySelector('.nav-dt'));
+      nav.insertBefore(a, nav.querySelector('.nav-ctg, .nav-dt'));   // trước các bộ dữ liệu riêng
     }
     let started = false;
     const show = on => {

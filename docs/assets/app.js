@@ -20,9 +20,18 @@ function norm(s) {
 let DB, C, D, N;
 // Chạy trong phần mềm Windows: dữ liệu nạp qua kênh bảo mật (window.SECURE), quyền admin / nhan_vien
 const ROLE = (window.SECURE && window.SECURE.role) || 'admin';
-// Bộ dữ liệu: 'noibo' (mặc định) hoặc 'doithu' (đơn giá đối thủ — độc lập, chỉ admin, chỉ tra cứu)
-const DS = new URLSearchParams(location.search).get('ds') === 'doithu' ? 'doithu' : 'noibo';
-if (DS === 'doithu' && ROLE !== 'admin') location.replace('index.html');
+// Bộ dữ liệu: 'noibo' (mặc định), 'ctg' (chiết tính giá — tách vật tư / nhân công) hoặc 'doithu' (đơn giá đối thủ).
+// CTG và đối thủ là dữ liệu độc lập, chỉ admin, chỉ tra cứu. RIENG = thông tin bộ riêng đang mở (null với dữ liệu nội bộ).
+const DS_RIENG = {
+  ctg: { khoi: 'ctg', file: 'data/ctg.js', bien: 'CTG', title: 'CSDL chiết tính giá', ph: 'Tìm đơn giá chiết tính… vd: be tong lot, cot thep, xay tuong',
+    tao: '<code>node modules/ctg/dong_goi.js --xlsx DATABASE_CTG.xlsx --js WEB/data/ctg.js</code>',
+    thieu: 'Gói dữ liệu này chưa có CSDL chiết tính giá. Admin chạy: node modules/ctg/dong_goi.js --xlsx DATABASE_CTG.xlsx --goi <gói admin .dgbw> --user <admin>' },
+  doithu: { khoi: 'doithu', file: 'data/doithu.js', bien: 'DT', title: 'Đơn giá đối thủ', ph: 'Tìm đơn giá đối thủ… vd: be tong lot, cot thep cot',
+    tao: '<code>python build_data.py</code> trong thư mục WEB' },
+};
+const DS = (q => (q === 'ctg' || q === 'doithu' ? q : 'noibo'))(new URLSearchParams(location.search).get('ds'));
+const RIENG = DS_RIENG[DS] || null;
+if (RIENG && ROLE !== 'admin') location.replace('index.html');
 let nameNorm, docNorm;          // chuỗi đã chuẩn hóa theo dòng
 let vocab, postings;            // chỉ mục đảo: từ -> Int32Array(dòng*4 + trường)
 let parVocab, parPost, parRows; // chỉ mục "Hạng mục cha"
@@ -35,16 +44,16 @@ let result = { ids: new Int32Array(0), score: null, matched: new Set(), partial:
 function boot() {
   if (window.SECURE) {
     $('#splash-msg').textContent = 'Đang giải mã dữ liệu…';
-    window.SECURE.load(DS === 'doithu' ? 'doithu' : 'db').then(txt => { window.DB = JSON.parse(txt); $('#splash-msg').textContent = 'Đang lập chỉ mục tìm kiếm…'; setTimeout(init, 30); })
-      .catch(e => { $('#splash-msg').textContent = 'Không mở được dữ liệu'; $('#splash-err').textContent = String(e && e.message || e); $('.bar').hidden = true; });
+    window.SECURE.load(RIENG ? RIENG.khoi : 'db').then(txt => { window.DB = JSON.parse(txt); $('#splash-msg').textContent = 'Đang lập chỉ mục tìm kiếm…'; setTimeout(init, 30); })
+      .catch(e => { $('#splash-msg').textContent = 'Không mở được dữ liệu'; $('#splash-err').textContent = (e && e.code === 'THIEU_KHOI' && RIENG && RIENG.thieu) || String(e && e.message || e); $('.bar').hidden = true; });
     return;
   }
   const s = document.createElement('script');
-  s.src = DS === 'doithu' ? 'data/doithu.js' : 'data/db.js';
-  s.onload = () => { if (DS === 'doithu') window.DB = window.DT; $('#splash-msg').textContent = 'Đang lập chỉ mục tìm kiếm…'; setTimeout(init, 30); };
+  s.src = RIENG ? RIENG.file : 'data/db.js';
+  s.onload = () => { if (RIENG) window.DB = window[RIENG.bien]; $('#splash-msg').textContent = 'Đang lập chỉ mục tìm kiếm…'; setTimeout(init, 30); };
   s.onerror = () => {
-    $('#splash-msg').textContent = 'Không tìm thấy data/db.js';
-    $('#splash-err').innerHTML = 'Hãy chạy <code>python build_data.py</code> trong thư mục WEB rồi mở lại trang.';
+    $('#splash-msg').textContent = 'Không tìm thấy ' + (RIENG ? RIENG.file : 'data/db.js');
+    $('#splash-err').innerHTML = `Hãy chạy ${RIENG ? RIENG.tao : '<code>python build_data.py</code> trong thư mục WEB'} rồi mở lại trang.`;
     $('.bar').hidden = true;
   };
   document.body.appendChild(s);
@@ -55,7 +64,7 @@ function init() {
   DB = window.DB; C = DB.cols; D = DB.dicts; N = DB.count;
   buildIndex();
   buildFacets();
-  if (DS === 'doithu') setupDoiThu();
+  if (RIENG) setupRieng();
   $('#db-meta').textContent = `${NF.format(N)} đơn giá · ${NF.format(D.p.length)} dự án · ${NF.format(D.f.length)} file nguồn · cập nhật ${DB.built}`;
   buildGroupIndex();
   const sec = readHash();
@@ -428,13 +437,15 @@ function toggleGroup(el) {
   body.hidden = !open; el.classList.toggle('open', open);
   if (open && !body.dataset.ready) { body.dataset.ready = 1; body.innerHTML = groupBody(e); e.detailShown = 0; appendDetails(el, e); }
 }
+const VT_NC = DS === 'ctg';   // CSDL chiết tính giá: hiện thêm vật tư / nhân công
+function medianOf(col, ids) { const v = ids.map(i => col[i]).filter(x => x !== null && x !== undefined).sort((a, b) => a - b); return v.length ? qtile(v, .5) : null; }
 function groupBody(e) {
   const s = e.st;
   const chip = (k, v) => `<span class="gs"><i>${k}</i> ${v}</span>`;
-  return `<div class="gsum">${chip('Đại diện', `<b>${money(s.med)}</b>`)}${chip('Trung bình', money(s.mean))}${chip('Phổ biến', `${money(s.p25)} – ${money(s.p75)}`)}${chip('Thấp – cao', `${money(s.min)} – ${money(s.max)}`)}${chip('Báo giá', NF.format(s.n))}${chip('Dự án', s.proj)}${chip('Mới nhất', s.latest)}${s.variants > 1 ? chip('Tên biến thể', s.variants) : ''}
+  return `<div class="gsum">${chip('Đại diện', `<b>${money(s.med)}</b>`)}${VT_NC ? chip('Vật tư', money(medianOf(C.mat, e.ids))) + chip('Nhân công', money(medianOf(C.lab, e.ids))) : ''}${chip('Trung bình', money(s.mean))}${chip('Phổ biến', `${money(s.p25)} – ${money(s.p75)}`)}${chip('Thấp – cao', `${money(s.min)} – ${money(s.max)}`)}${chip('Báo giá', NF.format(s.n))}${chip('Dự án', s.proj)}${chip('Mới nhất', s.latest)}${s.variants > 1 ? chip('Tên biến thể', s.variants) : ''}
     ${e.g >= 0 ? `<button class="link" data-drop="${e.g}">Xem điểm rơi giá →</button>` : ''}</div>
-    <div class="small muted" style="margin:4px 0 6px">Giá quy về mặt bằng ${DB.baseYear || 2026}; tính trên các dòng đang lọc. Bấm 1 dòng để xem đủ thông tin.</div>
-    <div class="tbl-wrap"><table class="dtl"><thead><tr><th class="num">Năm</th><th>Dự án</th><th>Tên công việc (gốc trong BOQ)</th><th class="num">Đơn giá gốc</th></tr></thead><tbody></tbody></table></div>
+    <div class="small muted" style="margin:4px 0 6px">${C.p26 || C.cp ? `Giá quy về mặt bằng ${DB.baseYear || 2026}` : 'Giá gốc theo từng báo giá (chưa quy đổi theo năm)'}${VT_NC ? ', vật tư / nhân công là trung vị riêng từng phần' : ''}; tính trên các dòng đang lọc. Bấm 1 dòng để xem đủ thông tin.</div>
+    <div class="tbl-wrap"><table class="dtl"><thead><tr><th class="num">Năm</th><th>Dự án</th><th>Tên công việc (gốc trong BOQ)</th>${VT_NC ? '<th class="num">Vật tư</th><th class="num">Nhân công</th>' : ''}<th class="num">Đơn giá gốc</th></tr></thead><tbody></tbody></table></div>
     <div class="dmore"></div>`;
 }
 function appendDetails(el, e) {
@@ -445,7 +456,7 @@ function appendDetails(el, e) {
     if (ROLE === 'nhan_vien') p[1] = p[2] || '';   // không hiện mã/tên dự án cho nhân viên
     const adj = p26(i), base = C.cp ? C.cp[i] : C.tot[i];
     return `<tr data-row="${i}"><td class="num">${C.y[i] || ''}</td><td>${esc(p[1] || '')}<div class="price-sub">${esc(p[4] || p[3] || '')}</div></td>
-      <td>${hl(C.name[i])}${loc ? `<div class="price-sub">@ ${esc(loc)}</div>` : ''}</td>
+      <td>${hl(C.name[i])}${loc ? `<div class="price-sub">@ ${esc(loc)}</div>` : ''}</td>${VT_NC ? `<td class="num">${fmt(C.mat[i])}</td><td class="num">${fmt(C.lab[i])}</td>` : ''}
       <td class="num"><b>${fmt(C.tot[i])}</b> <span class="small muted">/${esc(unitOf(i))}</span> ${flags(i)}${Math.abs(adj - base) > 0.5 || unitOf(i) !== e.unit ? `<div class="price-sub">≈ ${money(adj)} /${esc(e.unit)} (${DB.baseYear || 2026})</div>` : ''}</td></tr>`;
   }).join(''));
   e.detailShown = to;
@@ -542,10 +553,10 @@ function showRow(i) {
 
 /* ---------- Xuất Excel: TONG_HOP + CHI_TIET (outline +/−) ---------- */
 function exportXlsx() {
-  const gs = result.groups, base = DB.baseYear || 2026;
-  const sum = [['Tên nhóm đại diện', 'ĐV', `Đơn giá đại diện (${base})`, 'P25', 'P75', 'Trung bình', 'Thấp nhất', 'Cao nhất', 'Số báo giá', 'Số dự án', 'Năm mới nhất', 'Số tên biến thể', 'Mã nhóm']];
+  const gs = result.groups, base = DB.baseYear || 2026, quy = !!(C.p26 || C.cp);
+  const sum = [['Tên nhóm đại diện', 'ĐV', quy ? `Đơn giá đại diện (${base})` : 'Đơn giá đại diện', 'P25', 'P75', 'Trung bình', 'Thấp nhất', 'Cao nhất', 'Số báo giá', 'Số dự án', 'Năm mới nhất', 'Số tên biến thể', 'Mã nhóm']];
   for (const e of gs) { const s = e.st; sum.push([e.name, e.unit, Math.round(s.med), Math.round(s.p25), Math.round(s.p75), Math.round(s.mean), Math.round(s.min), Math.round(s.max), s.n, s.proj, s.latest, s.variants, e.g >= 0 ? D.g[e.g] : '']); }
-  const det = [['Nhóm / Tên công việc', 'ĐV', `Đơn giá quy về ${base}`, 'Đơn giá gốc', 'ĐV gốc', 'Năm', 'Dự án', 'Tỉnh/TP (2025)', 'Loại hình', 'Vị trí', 'Trạng thái', 'Đơn giá VL', 'Đơn giá NC', 'File nguồn', 'Mã dòng']];
+  const det = [['Nhóm / Tên công việc', 'ĐV', quy ? `Đơn giá quy về ${base}` : 'Đơn giá', 'Đơn giá gốc', 'ĐV gốc', 'Năm', 'Dự án', 'Tỉnh/TP (2025)', 'Loại hình', 'Vị trí', 'Trạng thái', 'Đơn giá VL', 'Đơn giá NC', 'File nguồn', 'Mã dòng']];
   const opts = [{}];
   let nrow = 0, cut = false;
   for (const e of gs) {
@@ -669,20 +680,21 @@ function renderDrop() {
   writeHash();
 }
 
-/* ---------- Chế độ dữ liệu đối thủ ---------- */
-function setupDoiThu() {
-  document.documentElement.classList.add('ds-doithu');
-  document.title = 'Đơn giá đối thủ';
-  const t = document.querySelector('.brand .title'); if (t) t.textContent = 'Đơn giá đối thủ';
+/* ---------- Chế độ bộ dữ liệu riêng (CTG, đối thủ) ---------- */
+function setupRieng() {
+  document.documentElement.classList.add('ds-' + DS);
+  document.title = RIENG.title;
+  const t = document.querySelector('.brand .title'); if (t) t.textContent = RIENG.title;
   const nav = document.querySelector('.topnav');
-  if (nav) nav.innerHTML = '<a href="index.html">Dữ liệu nội bộ</a><a href="index.html?ds=doithu" class="on">Đối thủ</a>';
-  $('#q').placeholder = 'Tìm đơn giá đối thủ… vd: be tong lot, cot thep cot';
+  if (nav) nav.innerHTML = [['', 'Dữ liệu nội bộ'], ['ctg', 'CTG'], ['doithu', 'Đối thủ']]
+    .map(([k, l]) => `<a href="index.html${k ? '?ds=' + k : ''}"${k === DS ? ' class="on"' : ''}>${l}</a>`).join('');
+  $('#q').placeholder = RIENG.ph;
 }
 
 /* ---------- Mục (section) ---------- */
 let SECTION = 'tra-cuu';
 function showSection(sec) {
-  if (DS === 'doithu') sec = 'tra-cuu';
+  if (RIENG) sec = 'tra-cuu';
   if (ROLE === 'nhan_vien') sec = 'tra-cuu';   // nhân viên chỉ được tra cứu
   SECTION = sec;
   $('#sec-search').hidden = sec !== 'tra-cuu';

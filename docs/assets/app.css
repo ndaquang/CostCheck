@@ -259,6 +259,9 @@ tbody tr:last-child td { border-bottom: 0; }
 .ds-doithu .logo { background: #b45309; }
 .ds-doithu [data-drop] { display: none !important; }
 .ds-doithu .topnav a.on { color: #b45309; background: #fdf0e1; }
+.ds-ctg .logo { background: #0f766e; }
+.ds-ctg [data-drop] { display: none !important; }
+.ds-ctg .topnav a.on { color: #0f766e; background: #e2f3ef; }
 
 /* ===== Danh sách nhóm đại diện (Tra cứu) ===== */
 .glist-h, .grp-h {
