@@ -8,6 +8,9 @@ Module "Điền giá BOQ" (mã nguồn riêng trong modules/de_xuat_gia/) đư�
 "Điền giá BOQ" trên thanh điều hướng, chỉ tài khoản admin thấy; dùng chung lần đăng nhập và CSDL đã nạp.
 Mã module chép vào <bản>/assets/dxg/, CSS được giới hạn trong #sec-dxg để không ảnh hưởng giao diện app.
 
+Bộ dữ liệu "CTG" (CSDL chiết tính giá, index.html?ds=ctg) là dữ liệu riêng của admin như "Đối thủ": app nạp khối "ctg"
+của gói admin. Khối này do modules/ctg/dong_goi.js thêm vào gói admin; build.py chỉ thêm mục CTG trên thanh điều hướng.
+
 Hai bản chỉ chứa MÃ. Không sao chép WEB/data và không sao chép gói dữ liệu.
 Dùng: python build.py              dựng app tra cứu + ghép module
       python build.py --module     chỉ ghép lại module vào bản đã dựng (không cần thư mục WEB)
@@ -35,8 +38,9 @@ DXG_CHO_NHAN_VIEN = False
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
        "connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'")
 
-CAM_TEN = re.compile(r"(^db\.js$|^doithu\.js$|^analysis\.js$|\.dgbw$|\.enc$|\.xlsx$|^tai_khoan\.json$|^thong_tin\.json$)", re.I)
-CAM_NOI_DUNG = re.compile(r"window\.(DB|AN|DT)\s*=\s*\{")
+CAM_TEN = re.compile(r"(^db\.js$|^doithu\.js$|^ctg\.js$|^analysis\.js$|\.dgbw$|\.enc$|\.xlsx$|^tai_khoan\.json$|^thong_tin\.json$)", re.I)
+CAM_NOI_DUNG = re.compile(r"window\.(DB|AN|DT|CTG)\s*=\s*\{")
+NAV_CTG = '<a href="index.html?ds=ctg" class="nav-ctg" title="CSDL chiết tính giá (vật tư + nhân công) — dữ liệu riêng, chỉ admin">CTG</a>'
 
 
 def dung_ban(thu_muc, vai_tro):
@@ -49,7 +53,7 @@ def dung_ban(thu_muc, vai_tro):
 
     src = open(os.path.join(WEB, "index.html"), encoding="utf-8").read()
     assert len(re.findall(r'<script src="assets/[^"]+"></script>', src)) >= 4, "index.html thiếu script ứng dụng (kiểm tra WEB/index.html)"
-    out = gan_cong_bao_ve(src, vai_tro, "shared")
+    out = gan_cong_bao_ve(gan_nav_ctg(src), vai_tro, "shared")
 
     out = gan_dien_gia(out, thu_muc, vai_tro)
 
@@ -73,6 +77,21 @@ def gan_cong_bao_ve(src, vai_tro, goc_shared):
     body = (f'<script src="{goc_shared}/crypto-web.js"></script>\n'
             f'<script src="{goc_shared}/secure.js" data-build="{vai_tro}" data-scripts="{danh_sach}"></script>\n')
     return out.replace("</body>", body + "</body>", 1)
+
+
+def gan_nav_ctg(html):
+    """Thêm mục CTG trên thanh điều hướng, ngay trước mục Đối thủ, nếu WEB/index.html chưa có."""
+    if "ds=ctg" in html:
+        return html
+    return re.sub(r'(\s*)(<a href="index\.html\?ds=doithu")', lambda m: m.group(1) + NAV_CTG + m.group(1) + m.group(2), html, count=1)
+
+
+def kiem_tra_web():
+    """docs/ được dựng lại từ WEB/assets: WEB chưa có bộ dữ liệu CTG thì bản dựng mới sẽ mất mục CTG đang có."""
+    app = open(os.path.join(WEB, "assets", "app.js"), encoding="utf-8", errors="ignore").read()
+    if not re.search(r"""['"]ctg['"]""", app):
+        sys.exit("DỪNG: WEB/assets/app.js chưa có bộ dữ liệu CTG (chiết tính giá). Chép docs/assets/app.js và "
+                 "docs/assets/app.css sang WEB/assets/ rồi chạy lại, nếu không bản dựng mới sẽ mất mục CTG.")
 
 
 def css_trong_muc(css, goc="#sec-dxg"):
@@ -180,6 +199,7 @@ def main():
         return
     if not os.path.isdir(WEB):
         sys.exit(f"Không thấy {WEB}. Cần thư mục WEB của dự án để lấy giao diện.")
+    kiem_tra_web()
     dung_ban(DOCS, "admin")
     kiem_tra_dau_ra(DOCS)
     dung_ban(NHAN_VIEN, "nhan_vien")

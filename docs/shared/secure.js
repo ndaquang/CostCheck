@@ -92,7 +92,8 @@
   async function layDuLieu(kind) {
     if (!KEYS || !PKG) throw new Error('Chưa đăng nhập.');
     const khoi = PKG.khoi[kind];
-    const key = khoi && KEYS[khoi.khoa];
+    if (!khoi) throw Object.assign(new Error(`Gói dữ liệu không có khối "${kind}".`), { code: 'THIEU_KHOI' });
+    const key = KEYS[khoi.khoa];
     if (!key) throw new Error('Không có quyền truy cập dữ liệu này.');
     return DGW.giaiKhoi(khoi.du_lieu, key, kind);
   }

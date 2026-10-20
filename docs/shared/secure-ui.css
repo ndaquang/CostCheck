@@ -8,7 +8,7 @@
 
 /* Nhân viên: chỉ tra cứu, không xuất, không sao chép */
 .role-staff [data-sec="diem-roi"], .role-staff [data-sec="phan-tich"], .role-staff #export,
-.role-staff .nav-dt, .role-staff .nav-admin, .role-staff [data-drop], .role-staff [data-act], .role-staff .actions { display: none !important; }
+.role-staff .nav-dt, .role-staff .nav-ctg, .role-staff .nav-admin, .role-staff [data-drop], .role-staff [data-act], .role-staff .actions { display: none !important; }
 .role-staff body, .role-staff #results, .role-staff #drawer { -webkit-user-select: none; user-select: none; }
 .role-staff input, .role-staff textarea { -webkit-user-select: text; user-select: text; }
 @media print { .role-staff body, .no-print body { display: none !important; } }

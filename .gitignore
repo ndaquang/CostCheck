@@ -2,3 +2,7 @@ __pycache__/
 modules/de_xuat_gia/demo/ket_qua/
 modules/de_xuat_gia/demo/ket_qua_*/
 modules/de_xuat_gia/hoc/ket_qua_*/
+*.dgbw
+*.dgbw.tmp
+*.truoc_ctg
+DATABASE_CTG*.xlsx
