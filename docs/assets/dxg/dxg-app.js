@@ -48,8 +48,7 @@
 
   /* ---------- Nhúng trong app tra cứu: mục "Điền giá BOQ" trên thanh điều hướng (chỉ admin) ---------- */
   function bootEmbed() {
-    const ds = new URLSearchParams(location.search).get('ds');
-    if (!ADMIN || ds === 'ctg' || ds === 'doithu') return;   // nhân viên / bộ dữ liệu riêng (CTG, đối thủ): không có mục này
+    if (!ADMIN) return;   // nhân viên: không có mục này. Khi mở bộ dữ liệu riêng (CTG, đối thủ), app tra cứu ẩn mục này
     const sec = document.createElement('section');
     sec.id = 'sec-dxg'; sec.hidden = true;
     sec.appendChild(document.getElementById('dxg-tpl').content.cloneNode(true));
@@ -76,7 +75,7 @@
       if (s) { e.preventDefault(); show(s.dataset.sec === 'dien-gia'); }
     });
     // mở lại trang khi đang ở mục này (#sec=dien-gia)
-    const fromHash = () => new URLSearchParams(location.hash.slice(1)).get('sec') === 'dien-gia';
+    const fromHash = () => new URLSearchParams(location.hash.slice(1)).get('sec') === 'dien-gia' && !new URLSearchParams(location.search).get('ds');
     if (fromHash()) {
       const go = () => (window.DB && window.DB.cols && !document.getElementById('splash') ? show(true) : setTimeout(go, 200));
       go();
