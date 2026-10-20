@@ -7,7 +7,7 @@
    4. Đơn giá bổ sung → dòng trước đó không có tham khảo được điền theo giá bổ sung.
    5. Giá điền tay + lưu / khôi phục phiên.
    6. Dữ liệu học: lựa chọn nhóm của QS được lưu (.dxgl) và dùng lại khi khớp.
-   7. Nhiều nguồn giá: đơn giá đối thủ gộp vào CSDL của module (nhóm trùng tên chung phân bố), lọc theo nguồn.
+   7. Nhiều nguồn giá: đơn giá đối thủ + CTG gộp vào CSDL của module (nhóm trùng tên chung phân bố, CTG quy về năm gốc), lọc theo nguồn.
    Dùng: node tests/e2e.js <thư mục tạm>   (cần playwright, python3 + openpyxl, LibreOffice) */
 const fs = require('fs'), path = require('path'), http = require('http');
 const { execFileSync } = require('child_process');
@@ -173,18 +173,27 @@ print(json.dumps([[ws.cell(r,4).value, ws.cell(r,5).value, ws.cell(r,7).value] f
   const got = await page.evaluate(id => { const it = window.__DXG_STATE.items.find(x => x.id === id); const c = it.cands[it.sel]; return { g: c.g, learned: c.learned, fit: it.c.fit.level }; }, pickId);
   check(got.g === want && got.learned === 'exact' && got.fit === 'cao', `dòng ${pickId} khớp nhóm QS đã chọn, độ khớp ${got.fit}`);
 
-  console.log('7. Nhiều nguồn giá: CSDL nội bộ + đơn giá đối thủ');
+  console.log('7. Nhiều nguồn giá: CSDL nội bộ + đơn giá đối thủ + CTG');
   const FX = require('./fixture_db.js');
-  fs.writeFileSync(path.join(SITE, 'data', 'db.js'), 'window.DB = ' + JSON.stringify(FX.makeDB()) + ';\nwindow.DT = ' + JSON.stringify(FX.makeDoiThu()) + ';');
+  const CTGDB = require('../../ctg/ctg.js').taoCSDL(require('../../ctg/tests/mau.js').luoiMau()).db;
+  fs.writeFileSync(path.join(SITE, 'data', 'db.js'), 'window.DB = ' + JSON.stringify(FX.makeDB()) + ';\nwindow.DT = ' + JSON.stringify(FX.makeDoiThu()) + ';\nwindow.CTG = ' + JSON.stringify(CTGDB) + ';');
   await page.reload(); await page.waitForSelector('#splash', { state: 'detached' });
   await page.waitForFunction(() => window.__DXG_STATE.sources.length === 2);
   const meta = await page.textContent('#dxg-meta');
-  check(/đối thủ 171/.test(meta) && /CTG: không có/.test(meta), 'gộp nguồn đối thủ vào CSDL của module: ' + meta);
+  check(/Đối thủ 171/.test(meta) && new RegExp(`CTG ${CTGDB.count}`).test(meta), 'gộp nguồn đối thủ + CTG vào CSDL của module: ' + meta);
+  const srcLine = await page.textContent('#dxg-src');
+  check(/CTG: quy giá về 2026/.test(srcLine), 'CTG (giá chưa quy đổi năm) được quy về năm gốc: ' + srcLine);
+  check(JSON.stringify(await page.$$eval('#o-src input', a => a.map(i => i.value))) === '["Nội bộ","Đối thủ","CTG"]', 'tùy chọn "Nguồn giá" có Nội bộ / Đối thủ / CTG');
   await run(path.join(WORK, 'BOQ_mau.xlsx'));
   s = await state();
   check(by('Xay dung|15').fill && by('Xay dung|15').price >= 3.1e8, 'VRV (chỉ nguồn đối thủ có) giờ có giá đề xuất: ' + by('Xay dung|15').price);
   const src6 = await page.evaluate(() => window.__DXG_STATE.items.find(it => it.id === 'Xay dung|6').c.st.src);
   check(src6['Nội bộ'] > 0 && src6['Đối thủ'] > 0, 'nhóm trùng tên: báo giá hai nguồn chung một phân bố ' + JSON.stringify(src6));
+  const pooled = await page.evaluate(() => window.__DXG_STATE.items.filter(it => it.c.pool && it.c.pool.length).map(it => ({ id: it.id, n: it.c.st.n, src: it.c.st.src, note: it.c.notes.join(' · ') })));
+  check(pooled.some(x => x.src['CTG'] > 0 && /Gộp \d+ nhóm gần giống/.test(x.note)), `gộp nhóm gần giống (tên CTG khác cách ghi): ${pooled.map(x => `${x.id} ${JSON.stringify(x.src)}`).join('; ')}`);
+  await page.uncheck('#o-pool');
+  check(await page.evaluate(() => window.__DXG_STATE.items.every(it => !it.c.pool.length)), 'bỏ chọn "Gộp nhóm gần giống": mỗi dòng chỉ dùng một nhóm');
+  await page.check('#o-pool');
   await page.click('#o-src summary');
   await page.uncheck('#o-src input[value="Đối thủ"]');
   s = await state();

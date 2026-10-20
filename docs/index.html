@@ -11,7 +11,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="stylesheet" href="shared/gate.css">
 <link rel="stylesheet" href="shared/secure-ui.css">
-<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v=05f2251c"><!--/DXG-->
+<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v=931c2d49"><!--/DXG-->
 </head>
 <body>
 <div id="splash">
@@ -205,7 +205,7 @@
       <div class="opt"><label>Tỉnh/TP</label><details class="msel" id="o-prov"><summary>Tất cả</summary><div class="msel-list"></div></details></div>
       <div class="opt"><label>Nguồn giá</label><details class="msel" id="o-src"><summary>Tất cả</summary><div class="msel-list"></div></details></div>
       <div class="opt"><label for="o-tol">Ngưỡng lệch baseline</label><input id="o-tol" type="number" value="10" step="1"><span class="unit">%</span></div>
-      <div class="opt chk"><label><input type="checkbox" id="o-review" checked> Bỏ dòng REVIEW</label><label><input type="checkbox" id="o-outlier" checked> Bỏ giá ngoại lai</label><label><input type="checkbox" id="o-warn"> Bỏ dòng có cảnh báo</label><label title="Chỉ dùng khi ghi vào ô Đơn giá"><input type="checkbox" id="o-overwrite"> Ghi đè ô đã có giá</label><label title="Chỉ dùng khi ghi vào ô Đơn giá"><input type="checkbox" id="o-amount" checked> Ô Thành tiền trống: điền = KL × Đơn giá</label></div>
+      <div class="opt chk"><label><input type="checkbox" id="o-review" checked> Bỏ dòng REVIEW</label><label><input type="checkbox" id="o-outlier" checked> Bỏ giá ngoại lai</label><label><input type="checkbox" id="o-warn"> Bỏ dòng có cảnh báo</label><label title="Gộp báo giá của các nhóm khớp gần ngang nhau, cùng đơn vị, không lệch thông số (tên ghi khác nhau giữa các nguồn / dự án)"><input type="checkbox" id="o-pool" checked> Gộp nhóm gần giống</label><label title="Chỉ dùng khi ghi vào ô Đơn giá"><input type="checkbox" id="o-overwrite"> Ghi đè ô đã có giá</label><label title="Chỉ dùng khi ghi vào ô Đơn giá"><input type="checkbox" id="o-amount" checked> Ô Thành tiền trống: điền = KL × Đơn giá</label></div>
     </div>
 
     <div class="kpis" id="kpis"></div>
@@ -245,6 +245,6 @@
   <div id="dw-body"></div>
 </aside></template><!--/DXG-->
 <script src="shared/crypto-web.js"></script>
-<script src="shared/secure.js" data-build="admin" data-scripts="shared/secure-ui.js,assets/xlsx-lite.js?v=8,assets/charts.js?v=8,assets/dash.js?v=8,assets/app.js?v=8,assets/dxg/pricing.js?v=05f2251c,assets/dxg/xlsx-io.js?v=05f2251c,assets/dxg/dxg-app.js?v=05f2251c"></script>
+<script src="shared/secure.js" data-build="admin" data-scripts="shared/secure-ui.js,assets/xlsx-lite.js?v=8,assets/charts.js?v=8,assets/dash.js?v=8,assets/app.js?v=8,assets/dxg/pricing.js?v=931c2d49,assets/dxg/xlsx-io.js?v=931c2d49,assets/dxg/dxg-app.js?v=931c2d49"></script>
 </body>
 </html>

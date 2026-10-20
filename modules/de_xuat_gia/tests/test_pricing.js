@@ -198,4 +198,47 @@ t('gộp nguồn giá: nhóm trùng tên gộp chung, nhóm mới thêm, lọc t
   assert.strictEqual(DXG.groupStats(IX2, vrv.g, {}).med, 3.2e8);
   assert.strictEqual(DXG.groupStats(IX2, vrv.g, { srcOff: new Set(['Đối thủ']), yearFrom: 2030 }).n, 0);
 });
+t('gộp CTG: giá quy về năm gốc theo hệ số năm của CSDL nội bộ; "tấn" không gộp với "kg"', () => {
+  const { taoCSDL } = require('../../ctg/ctg.js'), { luoiMau } = require('../../ctg/tests/mau.js');
+  const dst = makeDB(), C = dst.cols, F = { 2021: 1.3, 2022: 1.2, 2023: 1.15, 2024: 1.1, 2025: 1.05, 2026: 1 };
+  for (let i = 0; i < dst.count; i++) { C.cp[i] = C.tot[i]; C.p26[i] = Math.round(C.tot[i] * F[C.y[i]]); }
+  const f = DXG.yearFactors(dst);
+  assert.ok(Math.abs(f.get(2024) - 1.1) < 1e-3 && Math.abs(f.get(2021) - 1.3) < 1e-3);
+  const ctg = taoCSDL(luoiMau()).db;
+  const r = DXG.mergeDB(dst, ctg, 'CTG');
+  assert.strictEqual(r.quyDoi, ctg.count); assert.strictEqual(r.khongNam, 0);
+  const i24 = ctg.cols.y.findIndex(y => y === 2024), j = dst.count - ctg.count + i24;
+  assert.strictEqual(dst.cols.p26[j], Math.round(ctg.cols.tot[i24] * f.get(2024)));
+  const i26 = ctg.cols.y.findIndex(y => y === 2026);
+  assert.strictEqual(dst.cols.p26[dst.count - ctg.count + i26], ctg.cols.tot[i26]);
+  // tách vật tư / nhân công của CTG vẫn còn để thống kê
+  assert.ok(dst.cols.mat[j] > 0 && dst.cols.lab[j] > 0);
+  // đơn vị: nhóm "tấn" của nguồn khác không gộp vào nhóm "kg" cùng tên
+  const a = makeDB(), b = makeDB();
+  const kg = b.dicts.u.indexOf('kg'); b.dicts.u[kg] = 'tấn'; b.dicts.cu[b.dicts.cu.indexOf('kg')] = 'tấn';
+  const r2 = DXG.mergeDB(a, b, 'Khác');
+  assert.strictEqual(r2.nhomMoi, 2); assert.strictEqual(r2.nhomChung, 10);
+  assert.strictEqual(r2.quyDoi, 0);   // nguồn đã có giá quy đổi: giữ nguyên
+});
+t('gộp nhóm gần giống khi tính giá: cùng thông số thì gộp, khác mác / trong-ngoài thì không', () => {
+  const { taoCSDL } = require('../../ctg/ctg.js'), { luoiMau } = require('../../ctg/tests/mau.js');
+  const dst = require('../demo/du_lieu_mau.js').taoDB();
+  DXG.mergeDB(dst, taoCSDL(luoiMau()).db, 'CTG');
+  const IX3 = DXG.buildIndex(dst), name = g => IX3.groups[g].name;
+  const pool = (desc, unit) => { const m = DXG.match(IX3, { desc, unit }); return { m, p: DXG.poolCands(IX3, m, 0, { desc }).map(x => name(x.g)) }; };
+  assert.deepStrictEqual(pool('Bê tông lót M150', 'm3').p, ['Bê tông lót móng M150 đá 4x6']);
+  assert.deepStrictEqual(pool('Bê tông lót M100', 'm3').p.some(n => /M150/.test(n)), false);
+  assert.deepStrictEqual(pool('Trát tường trong nhà dày 15mm vữa M75', 'm2').p.some(n => /ngoài/.test(n)), false);
+  const son = pool('Sơn tường trong nhà 1 lớp lót 2 lớp phủ', 'm2');
+  assert.ok(!son.p.some(n => /ngoài/.test(n)) && son.p.length >= 1, JSON.stringify(son.p));
+  // thống kê gộp: đủ báo giá của các nhóm, mỗi dòng quy về đơn vị dòng BOQ
+  const { m } = pool('Bê tông lót M150', 'm3'), pl = DXG.poolCands(IX3, m, 0, { desc: 'Bê tông lót M150' });
+  const one = DXG.groupStats(IX3, m[0].g, {}), all = DXG.groupStats(IX3, m[0].g, {}, 1, pl);
+  assert.strictEqual(all.n, one.n + IX3.groups[pl[0].g].rows.length); assert.strictEqual(all.pooled, 1);
+  assert.ok(all.src['CTG'] > 0 && all.src['Nội bộ'] > 0);
+  // QS đã chọn nhóm: không gộp
+  assert.deepStrictEqual(DXG.poolCands(IX3, [{ ...m[0], picked: true }, ...m.slice(1)], 0, { desc: 'Bê tông lót M150' }), []);
+  // trong nhà / ngoài nhà là hai từ khác nhau sau chuẩn hóa
+  assert.ok(DXG.tokens('Sơn tường trong nhà').includes('noithat') && DXG.tokens('Trát ngoài 2cm').includes('ngoaithat'));
+});
 console.log(`\n${n} nhóm kiểm thử đạt.`);

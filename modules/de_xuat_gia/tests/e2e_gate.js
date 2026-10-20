@@ -31,6 +31,7 @@ async function makePackage() {
   return { dinh_dang: 'DGW1', users: [await user('admin', true), await user('nv1', false)], khoi: {
     db: { khoa: 'nv', du_lieu: await block((({ makeDB, fullDB }) => fullDB(makeDB()))(require('./fixture_db.js')), keyNv, 'db') },
     doithu: { khoa: 'admin', du_lieu: await block((({ makeDoiThu, fullDB }) => fullDB(makeDoiThu()))(require('./fixture_db.js')), keyAd, 'doithu') },   // chỉ khóa admin mở được
+    ctg: { khoa: 'admin', du_lieu: await block(require('../../ctg/ctg.js').taoCSDL(require('../../ctg/tests/mau.js').luoiMau()).db, keyAd, 'ctg') },
   } };
 }
 
@@ -74,7 +75,7 @@ let fails = 0; const check = (ok, text) => { console.log(`  ${ok ? '✓' : '✗'
   const nFill = await page.evaluate(() => window.__DXG_STATE.items.filter(it => it.c.fill).length);
   check(nFill >= 10, `dùng chung CSDL của app, không đăng nhập lại: ${nFill} dòng sẽ điền`);
   const meta = await page.textContent('#dxg-src');
-  check(/đối thủ 171/.test(meta), 'admin: khối đơn giá đối thủ trong gói .dgbw được gộp vào nguồn giá — ' + meta);
+  check(/Đối thủ 171/.test(meta) && /CTG \d+/.test(meta), 'admin: khối đối thủ + CTG trong gói .dgbw được gộp vào nguồn giá — ' + meta);
   check(await page.evaluate(() => window.__DXG_STATE.items.find(it => it.id === 'Xay dung|15').c.fill), 'dòng chỉ nguồn đối thủ có giá (VRV) được đề xuất');
   await page.click('#res-tbl tr[data-id="Xay dung|5"]'); await page.waitForSelector('#dxg-drawer:not([hidden])');
   check(await page.$$eval('#dw-body table.refs th', ths => ths.some(t => t.textContent === 'Dự án')), 'admin thấy tên dự án trong báo giá tham khảo');

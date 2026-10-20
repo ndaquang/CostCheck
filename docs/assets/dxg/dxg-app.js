@@ -43,7 +43,7 @@
     sources: [],   // nguồn giá ngoài CSDL nội bộ đã thử nạp: [{ label, status: 'ok' | 'none' | 'format', dong, nhomChung, nhomMoi }]
     // mode: 'col' = ghi giá đề xuất vào CỘT RIÊNG tô màu (mặc định, không đụng cột Đơn giá); 'rate' = điền vào ô Đơn giá đang trống
     opt: { mode: 'col', pick: 'p25', minFit: 'tb', round: 'auto', overwrite: false, amount: true, yearFrom: null, yearTo: null, types: new Set(), provs: new Set(),
-      excludeReview: true, excludeOutlier: true, excludeWarn: false, srcOff: new Set(), factor: 1, tolBl: 0.10, tolOk: 0.05, tolBt: 0.15 },
+      excludeReview: true, excludeOutlier: true, excludeWarn: false, srcOff: new Set(), pool: true, factor: 1, tolBl: 0.10, tolOk: 0.05, tolBt: 0.15 },
     view: { f: 'all', q: '', shown: PAGE, tab: 'lines', cur: null },
   };
 
@@ -120,7 +120,8 @@
     if (!ADMIN) return;
     for (const n of NGUON) {
       let src;
-      try { src = await readSource(n); } catch (e) { S.sources.push({ label: n.label, status: 'none' }); continue; }
+      try { src = await readSource(n); }
+      catch (e) { S.sources.push({ label: n.label, status: !window.SECURE || e.code === 'THIEU_KHOI' ? 'none' : 'loi', why: String(e && e.message || e) }); continue; }
       if (!src || !src.cols || !Array.isArray(src.cols.name) || !src.count) { S.sources.push({ label: n.label, status: 'format' }); continue; }
       S.sources.push({ label: n.label, status: 'ok', ...DXG.mergeDB(ownDB(), src, n.label) });
     }
@@ -135,19 +136,24 @@
     const meta = $('#dxg-meta'), srcEl = $('#dxg-src');
     const C = DBX.cols, D = DBX.dicts || {}, cnt = {};
     if (Array.isArray(C.ns)) for (let i = 0; i < DBX.count; i++) { const l = D.ns[C.ns[i]]; cnt[l] = (cnt[l] || 0) + 1; }
-    const parts = Object.entries(cnt).map(([l, n]) => `${l.toLowerCase()} ${NF.format(n)}`);
-    const miss = S.sources.filter(x => x.status !== 'ok').map(x => `${x.label}: ${x.status === 'none' ? 'không có trong gói dữ liệu' : 'định dạng khác, chưa dùng được'}`);
+    const parts = Object.entries(cnt).map(([l, n]) => `${l} ${NF.format(n)}`);
+    const miss = S.sources.filter(x => x.status !== 'ok').map(x => `${x.label}: ${x.status === 'none' ? 'không có trong gói dữ liệu' : x.status === 'loi' ? 'không mở được (' + x.why + ')' : 'định dạng khác, chưa dùng được'}`);
+    // nguồn chưa quy giá về năm gốc (CTG): đã quy đổi theo hệ số năm học từ CSDL nội bộ
+    const quy = S.sources.filter(x => x.quyDoi || x.khongNam).map(x => `${x.label}: quy giá về ${DBX.baseYear || 2026} theo hệ số năm của CSDL nội bộ (${NF.format(x.quyDoi)} dòng${x.khongNam ? `; ${NF.format(x.khongNam)} dòng không rõ năm giữ giá gốc` : ''})`);
+    const gop = S.sources.filter(x => x.status === 'ok').map(x => `${x.label}: ${NF.format(x.nhomChung)} nhóm trùng tên với CSDL, ${NF.format(x.nhomMoi)} nhóm mới`);
     if (meta) meta.textContent = `${NF.format(DBX.count)} đơn giá${parts.length > 1 ? ` (${parts.join(' · ')})` : S.extra.length ? ` (gồm ${NF.format(S.extra.length)} bổ sung)` : ''} · ${NF.format(IX.groups.length)} nhóm công việc · giá quy về ${DBX.baseYear || 2026} · cập nhật ${DBX.built || ''}${miss.length ? ' · ' + miss.join(' · ') : ''}`;
     // trong nội dung module (thấy được cả khi ghép vào app tra cứu)
     const lech = S.sources.filter(x => x.lechNam).map(x => x.label);
-    if (srcEl) srcEl.textContent = `Nguồn giá đang dùng: ${parts.length ? parts.join(' · ') : `nội bộ ${NF.format(DBX.count)}`} báo giá · ${NF.format(IX.groups.length)} nhóm công việc${miss.length ? ' · ' + miss.join(' · ') : ''}`
+    if (srcEl) srcEl.textContent = `Nguồn giá đang dùng: ${parts.length ? parts.join(' · ') : `Nội bộ ${NF.format(DBX.count)}`} báo giá · ${NF.format(IX.groups.length)} nhóm công việc${miss.length ? ' · ' + miss.join(' · ') : ''}`
+      + (gop.length ? ` · ${gop.join(' · ')}` : '') + (quy.length ? ` · ${quy.join(' · ')}` : '')
       + (lech.length ? ` · Lưu ý: ${lech.join(', ')} quy giá về năm gốc khác CSDL nội bộ` : '');
   }
+  const nhieuNguon = () => !!(DBX && DBX.dicts && DBX.dicts.ns && DBX.dicts.ns.length > 1 && Array.isArray(DBX.cols.ns));
   // Nguồn có báo giá trong phân bố: số báo giá theo nguồn của một thống kê nhóm (chỉ hiện khi CSDL có từ 2 nguồn)
   const srcTxt = st => {
     const D = DBX.dicts || {};
     if (!st || !st.src || !D.ns || D.ns.length < 2) return '';
-    return ' (' + Object.entries(st.src).map(([l, n]) => `${l.toLowerCase()} ${n}`).join(', ') + ')';
+    return ' (' + Object.entries(st.src).map(([l, n]) => `${l} ${n}`).join(', ') + ')';
   };
   function rebuildIndex() {
     if (!DBX) DBX = window.DB;
@@ -214,6 +220,7 @@
     o.factor = (n('#o-factor') ?? 100) / 100;
     o.tolBl = (n('#o-tol') ?? 10) / 100;
     o.excludeReview = $('#o-review').checked; o.excludeOutlier = $('#o-outlier').checked; o.excludeWarn = $('#o-warn').checked;
+    o.pool = $('#o-pool').checked;
   }
   function writeOptions() {
     const o = S.opt;
@@ -221,7 +228,7 @@
     $('#o-pick').value = o.pick || 'p25'; $('#o-minfit').value = o.minFit || 'tb'; $('#o-round').value = o.round || 'auto'; $('#o-overwrite').checked = !!o.overwrite; $('#o-amount').checked = o.amount !== false;
     $('#o-yfrom').value = o.yearFrom ?? ''; $('#o-yto').value = o.yearTo ?? '';
     $('#o-factor').value = Math.round(o.factor * 1000) / 10; $('#o-tol').value = Math.round(o.tolBl * 1000) / 10;
-    $('#o-review').checked = o.excludeReview; $('#o-outlier').checked = o.excludeOutlier; $('#o-warn').checked = o.excludeWarn;
+    $('#o-review').checked = o.excludeReview; $('#o-outlier').checked = o.excludeOutlier; $('#o-warn').checked = o.excludeWarn; $('#o-pool').checked = o.pool !== false;
     buildSourceOptions();
     for (const [id, set] of [['o-type', o.types], ['o-prov', o.provs]]) {
       $$(`#${id} input`).forEach(i => { i.checked = set.has(i.value); });
@@ -485,12 +492,12 @@
 
   // Thống kê nhóm có bộ nhớ đệm theo bộ lọc hiện hành
   let statCache = new Map(), statKey = '';
-  function stats(gid, ratio) {
+  function stats(gid, ratio, pool = []) {
     const o = S.opt;
     const fk = [o.yearFrom, o.yearTo, [...o.types].join(','), [...o.provs].join(','), [...o.srcOff].join(','), o.excludeReview, o.excludeOutlier, o.excludeWarn, IX.groups.length].join('|');
     if (fk !== statKey) { statCache = new Map(); statKey = fk; }
-    const k = gid + '|' + ratio;
-    if (!statCache.has(k)) statCache.set(k, DXG.groupStats(IX, gid, o, ratio));
+    const k = gid + '|' + ratio + pool.map(p => `+${p.g}|${p.ratio}`).join('');
+    if (!statCache.has(k)) statCache.set(k, DXG.groupStats(IX, gid, o, ratio, pool));
     return statCache.get(k);
   }
   function roundPrice(v) {
@@ -503,7 +510,8 @@
   }
   function calc(it) {
     const o = S.opt, f = o.factor, c = it.sel >= 0 ? it.cands[it.sel] : null;
-    const st = c ? stats(c.g, c.ratio) : null;
+    const pool = c && o.pool ? DXG.poolCands(IX, it.cands, it.sel, { desc: it.desc, near: it.heads[it.heads.length - 1] || '' }) : [];   // nhóm gần giống gộp chung báo giá
+    const st = c ? stats(c.g, c.ratio, pool) : null;
     const fit = c ? (c.picked ? { level: 'cao', value: 1, picked: true } : DXG.confidence(c, st)) : { level: 'none', value: 0 };
     const shown = !!(c && st && st.n > 0 && (fit.level !== 'none' || c.picked));
     const ref = shown ? { p10: st.p10 * f, p25: st.p25 * f, p50: st.med * f, p75: st.p75 * f, p90: st.p90 * f } : null;
@@ -542,11 +550,12 @@
       if (st.n < 3) notes.push(`Ít mẫu (${st.n} báo giá)`);
       if (st.relaxed) notes.push('Đã nới bộ lọc');
       if (c.ratio !== 1) notes.push(`Quy đổi ${IX.groups[c.g].unit} ×${fmtQ(c.ratio)}`);
+      if (pool.length) notes.push(`Gộp ${pool.length + 1} nhóm gần giống: ${pool.map(p => IX.groups[p.g].name).join('; ')}`);
       if (IX.groups[c.g].boost) notes.push('Từ đơn giá bổ sung');
       if (o.mode === 'col' && isNum(it.qs)) notes.push(`Ô Đơn giá đang có ${fmt(it.qs)} — giữ nguyên`);
       if (c.learned && !c.picked) notes.push(c.learned === 'exact' ? 'Theo dữ liệu học (QS đã chọn nhóm này)' : 'Theo dữ liệu học (mô tả gần giống)');
     }
-    it.c = { cand: c, shown, st, fit, ref, best, price: finalPrice, fill, why, qs, d50, ev, base, baseSrc, dev, devHi, notes,
+    it.c = { cand: c, pool, shown, st, fit, ref, best, price: finalPrice, fill, why, qs, d50, ev, base, baseSrc, dev, devHi, notes,
       amt: isNum(finalPrice) && isNum(it.qty) ? finalPrice * it.qty : null, amtBase: isNum(base) && isNum(it.qty) ? base * it.qty : null };
     return it.c;
   }
@@ -696,8 +705,8 @@
     if (c.shown) {
       const ids = [...c.st.ids].sort((a, b) => (IX.C.y[b] || 0) - (IX.C.y[a] || 0)).slice(0, 60);
       h += `<h4>Báo giá tham khảo (${c.st.n}${c.st.n > ids.length ? `, hiện ${ids.length} mới nhất` : ''})</h4>
-        <div class="tbl-wrap"><table class="refs"><thead><tr><th>Năm</th>${ADMIN ? '<th>Dự án</th>' : ''}<th>Tỉnh/TP</th><th>Tên trong báo giá</th><th class="num">Giá quy đổi</th><th class="num">Giá gốc</th></tr></thead><tbody>
-        ${ids.map(i => { const p = projOf(i); return `<tr><td>${IX.C.y[i] || ''}</td>${ADMIN ? `<td>${esc(p[1] || p[0] || '')}</td>` : ''}<td>${esc(p[4] || p[3] || '')}</td><td>${esc(IX.C.name[i])}</td><td class="num">${fmt(IX.price(i) * c.cand.ratio * o.factor)}</td><td class="num small">${fmt(IX.C.tot[i])} /${esc(IX.unitOf(i))}</td></tr>`; }).join('')}
+        <div class="tbl-wrap"><table class="refs"><thead><tr><th>Năm</th>${ADMIN ? '<th>Dự án</th>' : ''}<th>Tỉnh/TP</th>${nhieuNguon() ? '<th>Nguồn</th>' : ''}<th>Tên trong báo giá</th><th class="num">Giá quy đổi</th><th class="num">Giá gốc</th></tr></thead><tbody>
+        ${ids.map(i => { const p = projOf(i); return `<tr><td>${IX.C.y[i] || ''}</td>${ADMIN ? `<td>${esc(p[1] || p[0] || '')}</td>` : ''}<td>${esc(p[4] || p[3] || '')}</td>${nhieuNguon() ? `<td>${esc(IX.D.ns[IX.C.ns[i]] || '')}</td>` : ''}<td>${esc(IX.C.name[i])}</td><td class="num">${fmt(IX.price(i) * (c.st.rate.get(i) ?? c.cand.ratio) * o.factor)}</td><td class="num small">${fmt(IX.C.tot[i])} /${esc(IX.unitOf(i))}</td></tr>`; }).join('')}
         </tbody></table></div>`;
     }
     $('#dw-body').innerHTML = h;
@@ -903,7 +912,7 @@
     onFile('#f-boq', loadBoq); onFile('#f-extra', loadExtra); onFile('#f-base', loadBase); onFile('#f-sess', loadSession);
     $('#map-tbl').addEventListener('change', onMapChange);
     $('#go').addEventListener('click', runAll);
-    for (const id of ['#o-mode', '#o-pick', '#o-minfit', '#o-round', '#o-overwrite', '#o-amount', '#o-yfrom', '#o-yto', '#o-factor', '#o-tol', '#o-review', '#o-outlier', '#o-warn']) $(id).addEventListener('change', recompute);
+    for (const id of ['#o-pool', '#o-mode', '#o-pick', '#o-minfit', '#o-round', '#o-overwrite', '#o-amount', '#o-yfrom', '#o-yto', '#o-factor', '#o-tol', '#o-review', '#o-outlier', '#o-warn']) $(id).addEventListener('change', recompute);
     $('#flt').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setFilter(b.dataset.f); });
     $('#kpis').addEventListener('click', e => { const k = e.target.closest('.kpi[data-f]'); if (k) { switchTab('lines'); setFilter(k.dataset.f); } });
     let tq; $('#flt-q').addEventListener('input', e => { clearTimeout(tq); tq = setTimeout(() => { S.view.q = e.target.value; S.view.shown = PAGE; renderTable(); }, 200); });
