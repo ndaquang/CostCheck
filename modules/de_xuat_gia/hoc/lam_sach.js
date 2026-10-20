@@ -1,14 +1,16 @@
 'use strict';
 /* LÀM SẠCH CSDL ĐƠN GIÁ — soát lỗi dữ liệu làm giảm tỉ lệ khớp và làm sai giá tham khảo.
-   Dùng: node modules/de_xuat_gia/hoc/lam_sach.js [--db data/db.js] [--out <thư mục>] [--sua <db_sach.js>] [--gan-nhom] [--nhanh]
+   Dùng: node modules/de_xuat_gia/hoc/lam_sach.js [--db data/db.js] [--them data/doithu.js] [--out <thư mục>] [--sua <db_sach.js>] [--gan-nhom] [--nhanh]
      --db        CSDL thật (window.DB = {...}); bỏ trống = CSDL giả lập của bộ chạy thử
+     --them      gộp thêm nguồn giá cùng định dạng để soát chung (vd đối thủ, CTG); không dùng cùng --sua
      --sua       ghi CSDL đã sửa các lỗi an toàn: bỏ giá không hợp lệ, bỏ dòng trùng hệt, đánh dấu ngoại lai chưa đánh dấu
      --gan-nhom  (kèm --sua) gán nhóm cho dòng chưa có nhóm khi gợi ý rất chắc (khớp ≥ 0.85, cùng đơn vị)
      --nhanh     bỏ bước dò dòng có thể sai nhóm (chậm với CSDL rất lớn)
    Kết quả: BAO_CAO_LAM_SACH.xlsx (Tóm tắt + mỗi loại lỗi một sheet) và lam_sach.json. CSDL gốc không bị sửa. */
 const { DXG, fs, path, arg, flag, loadDB, writeXlsx } = require('./chung.js');
 
-const { db: DB, demo } = loadDB(arg('--db') && path.resolve(arg('--db')));
+if (arg('--sua') && arg('--them')) { console.error('--sua chỉ dùng với MỘT CSDL (không kèm --them), để bản sửa không trộn nguồn giá khác vào CSDL nội bộ.'); process.exit(2); }
+const { db: DB, demo, nguon } = loadDB(arg('--db') && path.resolve(arg('--db')));
 const OUT = path.resolve(arg('--out') || path.join(__dirname, 'ket_qua_lam_sach'));
 fs.mkdirSync(OUT, { recursive: true });
 const t0 = Date.now();
@@ -120,7 +122,7 @@ const order = Object.keys(M).filter(k => issues[k]);
 const total = order.reduce((n, k) => n + issues[k].rows.length, 0);
 const sum = {
   name: 'Tóm tắt', title: 'LÀM SẠCH CSDL ĐƠN GIÁ',
-  note: `CSDL: ${demo ? 'GIẢ LẬP (bộ chạy thử)' : arg('--db')} · ${N.toLocaleString('vi-VN')} dòng · ${IX.groups.length.toLocaleString('vi-VN')} nhóm · dựng ${DB.built || '?'}\nDữ liệu sạch giúp: khớp đúng nhóm hơn (đơn vị, tên nhóm thống nhất) và giá tham khảo P25/P50 đáng tin hơn (không lẫn giá nhập sai).`,
+  note: `CSDL: ${demo ? 'GIẢ LẬP (bộ chạy thử)' : arg('--db')}${nguon.length ? ' + ' + nguon.map(x => `${x.label} (${x.file}, ${x.dong} dòng)`).join(' + ') : ''} · ${N.toLocaleString('vi-VN')} dòng · ${IX.groups.length.toLocaleString('vi-VN')} nhóm · dựng ${DB.built || '?'}\nDữ liệu sạch giúp: khớp đúng nhóm hơn (đơn vị, tên nhóm thống nhất) và giá tham khảo P25/P50 đáng tin hơn (không lẫn giá nhập sai).`,
   header: ['Loại lỗi', 'Số mục', 'Vì sao cần sửa', 'Cách sửa', 'Sửa tự động (--sua)'], widths: [26, 10, 70, 60, 14],
   rows: Object.keys(M).map(k => [M[k].title, issues[k] ? issues[k].rows.length : 0, M[k].why, M[k].fix, M[k].safe ? 'có' : k === 'chua_nhom' ? 'với --gan-nhom' : 'không']),
 };

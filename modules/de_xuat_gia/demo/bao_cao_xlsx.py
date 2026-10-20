@@ -37,6 +37,7 @@ kpi = [
     ('File BOQ đã điền giá', d.get('out') or '(không có ô nào được điền)'),
     ('Ghi giá vào', 'Cột riêng "ĐƠN GIÁ ĐỀ XUẤT (CSDL)" tô màu, sau cột cuối của bảng — cột Đơn giá / Thành tiền giữ nguyên' if COL else 'Ô Đơn giá đang trống'),
     ('Cách chọn giá', PICK.get(d.get('pick'), d.get('pick'))),
+    ('Nguồn giá', d.get('nguon') or ''),
     ('Đơn giá bổ sung đã nạp', ', '.join(d.get('extra') or []) or 'không có'),
     ('Dòng hạng mục', len(rows)),
     (L_FILL, n_fill), (L_KEEP, n_keep), (L_NONE, len(rows) - n_fill - n_keep),
@@ -60,14 +61,14 @@ for i, s in enumerate(cau_truc, 2):
 
 ws = wb.create_sheet('Chi tiết')
 H = ['Sheet', 'Dòng', 'Mã', 'Mô tả', 'Tiêu đề gần nhất', 'ĐV', 'KL', 'Nhóm tham khảo CSDL', 'Độ phù hợp', 'Số BG',
-     'P10', 'P25', 'P50', 'P75', 'P90', 'Giá đề xuất' if COL else 'Đơn giá', 'Thành tiền', 'Trạng thái', 'Lý do', 'Giá có sẵn: đánh giá', 'Lưu ý dữ liệu', 'Giá có sẵn trong BOQ']
-header(ws, 1, H, [12, 6, 6, 44, 28, 7, 10, 34, 11, 7, 11, 11, 11, 11, 11, 13, 15, 20, 34, 16, 30, 14])
+     'P10', 'P25', 'P50', 'P75', 'P90', 'Giá đề xuất' if COL else 'Đơn giá', 'Thành tiền', 'Trạng thái', 'Lý do', 'Giá có sẵn: đánh giá', 'Lưu ý dữ liệu', 'Giá có sẵn trong BOQ', 'Nguồn báo giá']
+header(ws, 1, H, [12, 6, 6, 44, 28, 7, 10, 34, 11, 7, 11, 11, 11, 11, 11, 13, 15, 20, 34, 16, 30, 14, 26])
 for i, r in enumerate(rows, 2):
     ref = r.get('ref') or {}; nhom = r.get('nhom') or ''
     vals = [r['sheet'], r['dong'], r['ma'], r['mo_ta'], r['near'], r['dv'], r['kl'], nhom, FIT.get(r['phu_hop'], ''), r.get('n'),
             *[round(ref[k]) if ref else None for k in ['p10', 'p25', 'p50', 'p75', 'p90']],
             r.get('gia'), (r['gia'] * r['kl']) if r.get('gia') and r.get('kl') else None, status(r), r['ly_do'],
-            EV.get(r.get('danh_gia_co_san') or '', ''), r.get('luu_y'), r.get('gia_co_san')]
+            EV.get(r.get('danh_gia_co_san') or '', ''), r.get('luu_y'), r.get('gia_co_san'), r.get('nguon')]
     for j, v in enumerate(vals, 1):
         c = ws.cell(i, j, v); c.border = B
         if j in (4, 5, 8, 19, 21): c.alignment = Alignment(wrap_text=True, vertical='top')
@@ -78,6 +79,6 @@ for i, r in enumerate(rows, 2):
 n = len(rows) + 1
 for lbl, (bg, fg) in ST.items():
     ws.conditional_formatting.add(f'R2:R{n}', FormulaRule(formula=[f'$R2="{lbl}"'], fill=PatternFill('solid', bgColor=bg), font=Font(color=fg, bold=True)))
-ws.freeze_panes = 'E2'; ws.auto_filter.ref = f'A1:V{n}'
+ws.freeze_panes = 'E2'; ws.auto_filter.ref = f'A1:W{n}'
 wb.save(out)
 print('ok', out)

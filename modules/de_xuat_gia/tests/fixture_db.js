@@ -46,7 +46,23 @@ function makeDB() {
   cols.st.push(0); cols.ol.push(-1); cols.warn.push(-1); cols.mat.push(null); cols.lab.push(null); cols.c.push(0); cols.f.push(0);
   return { built: '2026-10-01', baseYear: 2026, count: cols.name.length, cols, dicts: D, projects, nrm2: [] };
 }
-if (typeof module === 'object') module.exports = { makeDB };
+// Nguồn giá "đối thủ" GIẢ LẬP: cùng định dạng, cùng tên nhóm (giá cao hơn ~10%, dự án riêng) + một nhóm chỉ nguồn này có (VRV)
+function makeDoiThu() {
+  const db = makeDB(), C = db.cols, D = db.dicts;
+  db.projects = [['DT01', 'Dự án đối thủ 1', 'Nhà xưởng', 'Long An', 'Tây Ninh', 'CĐT X'], ['DT02', 'Dự án đối thủ 2', 'Văn phòng', 'Hà Nội', 'Hà Nội', 'CĐT Y']];
+  for (const k of ['p26', 'cp', 'tot', 'mat', 'lab']) C[k] = C[k].map(v => v === null ? null : Math.round(v * 1.1));
+  C.p = C.p.map((_, i) => i % 2);
+  const g = D.g.push('Hệ thống điều hòa VRV') - 1, gn = D.gn.push('Hệ thống điều hòa VRV') - 1, u = D.u.push('bộ') - 1, cu = D.cu.push('bộ') - 1;
+  for (const [k, price] of [[0, 310000000], [1, 330000000]]) {
+    for (const key of Object.keys(C)) C[key].push(C[key][0]);
+    const i = C.name.length - 1;
+    C.name[i] = 'Hệ thống điều hòa VRV'; C.g[i] = g; C.gn[i] = gn; C.u[i] = u; C.cu[i] = cu; C.p[i] = k;
+    C.p26[i] = C.cp[i] = C.tot[i] = price; C.ol[i] = -1; C.st[i] = 0; C.mat[i] = C.lab[i] = null;
+  }
+  db.count = C.name.length;
+  return db;
+}
+if (typeof module === 'object') module.exports = { makeDB, makeDoiThu };
 if (require.main === module) {
   const out = process.argv[2];
   require('fs').writeFileSync(out, 'window.DB = ' + JSON.stringify(makeDB()) + ';\n');

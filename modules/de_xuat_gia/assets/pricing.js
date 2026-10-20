@@ -42,7 +42,11 @@
     ['beam', 'dam'], ['beams', 'dam'], ['slab', 'san'], ['slabs', 'san'], ['railing', 'lan can'], ['handrail', 'lan can'],
     ['tiling', 'gach'], ['tiles', 'gach'], ['tile', 'gach'], ['steel', 'thep'], ['pile', 'coc'], ['piles', 'coc'], ['piling', 'coc'],
     ['stainless steel', 'inox'], ['stainless', 'inox'], ['ready mix', 'thuong pham'], ['ready mixed', 'thuong pham'],
-    ['noi that', 'trong nha'], ['ngoai that', 'ngoai nha'], ['internal', 'trong'], ['interior', 'trong nha'], ['external', 'ngoai'], ['exterior', 'ngoai nha'],
+    // trong nhà / ngoài nhà: "trong" là từ dừng nên phải đổi thành một từ riêng, nếu không "sơn tường trong nhà" ≈ "sơn tường ngoài nhà"
+    ['trong nha', 'noithat'], ['noi that', 'noithat'], ['ngoai nha', 'ngoaithat'], ['ngoai that', 'ngoaithat'],
+    ['tuong trong', 'tuong noithat'], ['tuong ngoai', 'tuong ngoaithat'], ['trat trong', 'trat noithat'], ['trat ngoai', 'trat ngoaithat'],
+    ['son trong', 'son noithat'], ['son ngoai', 'son ngoaithat'], ['op trong', 'op noithat'], ['op ngoai', 'op ngoaithat'],
+    ['internal', 'noithat'], ['interior', 'noithat'], ['external', 'ngoaithat'], ['exterior', 'ngoaithat'],
     ['moisture resistant', 'chong am'], ['concealed frame', 'khung chim'], ['cementitious', 'goc xi mang'], ['roof', 'mai'], ['roofing', 'lop mai'],
     ['machine', 'may'], ['door', 'cua di'], ['window', 'cua so'], ['wall', 'tuong'], ['walls', 'tuong'], ['floor', 'nen'], ['flooring', 'lat nen'],
     ['porcelain', 'granite'], ['xa ban', 'phe thai'], ['ba bot', 'ba matit'], ['matic', 'matit'],
@@ -419,10 +423,118 @@
     }
   }
 
+  /* ---------- Gộp nhiều nguồn giá vào một CSDL ---------- */
+  // Mỗi dòng mang nhãn nguồn (cột ns, từ điển D.ns: 'Nội bộ', 'Đối thủ', 'CTG', 'Bổ sung'…) để lọc và thống kê theo nguồn.
+  function tagSource(DB, label) {
+    const C = DB.cols, D = DB.dicts = DB.dicts || {};
+    if (!D.ns) D.ns = [];
+    if (!C.ns) { if (!D.ns.length) D.ns.push('Nội bộ'); C.ns = new Array(DB.count).fill(0); }
+    let k = D.ns.indexOf(label);
+    if (k < 0) { D.ns.push(label); k = D.ns.length - 1; }
+    return k;
+  }
+  // Hệ số quy giá gốc về năm gốc theo năm báo giá, học từ chính CSDL: trung vị (giá đã quy về năm gốc / giá gốc) của
+  // các dòng cùng năm. -> Map(năm → hệ số); rỗng nếu CSDL không có giá đã quy đổi (p26)
+  function yearFactors(DB) {
+    const C = DB.cols, out = new Map(), by = new Map();
+    if (!Array.isArray(C.p26) || !Array.isArray(C.y)) return out;
+    for (let i = 0; i < DB.count; i++) {
+      const a = C.p26[i], b = Array.isArray(C.cp) && C.cp[i] > 0 ? C.cp[i] : C.tot[i], y = C.y[i];
+      if (!(a > 0 && b > 0 && y)) continue;
+      let v = by.get(y); if (!v) by.set(y, v = []); v.push(a / b);
+    }
+    for (const [y, v] of by) if (v.length >= 5) out.set(y, qtile(v.sort((x, z) => x - z), 0.5));
+    return out;
+  }
+  // Gộp CSDL src (cùng định dạng window.DB) vào dst — dst phải là bản sao riêng vì bị sửa tại chỗ.
+  // • Nhóm đại diện của src trùng tên + đơn vị (cùng đơn vị gốc và hệ số: "tấn" khác "kg") với một nhóm của dst được gộp
+  //   vào nhóm đó (giá hai nguồn chung một phân bố); nhóm chưa có thì thêm mới.
+  // • src chưa quy giá về năm gốc (không có p26, vd CTG) mà dst có: giá được quy đổi theo hệ số năm học từ dst
+  //   (năm trước năm sớm nhất có hệ số dùng hệ số năm sớm nhất; từ năm gốc trở đi giữ nguyên; không rõ năm giữ giá gốc).
+  // -> { dong, nhomChung, nhomMoi, lechNam, quyDoi, khongNam }
+  function mergeDB(dst, src, label) {
+    const C = dst.cols, D = dst.dicts, SC = src.cols, SD = src.dicts || {}, N0 = dst.count, M = src.count;
+    const quy = Array.isArray(C.p26) && !Array.isArray(SC.p26) && !Array.isArray(SC.cp) ? yearFactors(dst) : null;
+    const years = quy ? [...quy.keys()].sort((a, b) => a - b) : [];
+    const base = dst.baseYear || (years.length ? years[years.length - 1] : 0);
+    const factorOf = y => {
+      if (!y) return null;
+      if (quy.has(y)) return quy.get(y);
+      if (y >= base) return 1;
+      if (!years.length) return null;
+      let best = years[0]; for (const x of years) if (Math.abs(x - y) < Math.abs(best - y)) best = x;   // năm gần nhất có hệ số
+      return quy.get(best);
+    };
+    let quyDoi = 0, khongNam = 0;
+    tagSource(dst, 'Nội bộ');
+    const ns = tagSource(dst, label);
+    const col = (cols, k) => Array.isArray(cols[k]);
+    const gName = (cols, dicts, i) => col(cols, 'gn') && cols.gn[i] >= 0 && dicts.gn ? dicts.gn[cols.gn[i]] : col(cols, 'g') && cols.g[i] >= 0 && dicts.g ? dicts.g[cols.g[i]] : null;
+    const uName = (cols, dicts, i) => col(cols, 'cu') && cols.cu[i] >= 0 && dicts.cu ? dicts.cu[cols.cu[i]] : col(cols, 'u') && cols.u[i] >= 0 && dicts.u ? dicts.u[cols.u[i]] : '';
+    const gKey = (name, unit) => { const u = parseUnit(unit); return norm(name) + '|' + u.base + '|' + u.factor; };
+    const lookup = new Map();
+    const dictIdx = (k, v) => {
+      if (v === null || v === undefined) return -1;
+      let m = lookup.get(k);
+      if (!m) { m = new Map(); (D[k] || (D[k] = [])).forEach((x, j) => { if (!m.has(x)) m.set(x, j); }); lookup.set(k, m); }
+      let j = m.get(v);
+      if (j === undefined) { D[k].push(v); j = D[k].length - 1; m.set(v, j); }
+      return j;
+    };
+    // nhóm của dst theo tên + đơn vị
+    const gDst = new Map();
+    if (col(C, 'g')) for (let i = 0; i < N0; i++) if (C.g[i] >= 0) { const k = gKey(gName(C, D, i), uName(C, D, i)); if (!gDst.has(k)) gDst.set(k, [C.g[i], col(C, 'gn') ? C.gn[i] : -1]); }
+    const gMap = new Map();   // nhóm src -> [g, gn] ở dst
+    let chung = 0, moi = 0;
+    const mapGroup = i => {
+      if (!col(SC, 'g') || SC.g[i] < 0 || !col(C, 'g')) return [-1, -1];
+      const sg = SC.g[i];
+      if (gMap.has(sg)) return gMap.get(sg);
+      const name = gName(SC, SD, i), k = gKey(name, uName(SC, SD, i));
+      let r = gDst.get(k);
+      if (r) chung++;
+      else {
+        D.g = D.g || []; D.g.push(SD.g ? SD.g[sg] : name);
+        let gn = -1; if (col(C, 'gn')) { D.gn = D.gn || []; D.gn.push(name); gn = D.gn.length - 1; }
+        r = [D.g.length - 1, gn]; gDst.set(k, r); moi++;
+      }
+      gMap.set(sg, r);
+      return r;
+    };
+    // dự án của src nối vào cuối danh sách dự án
+    dst.projects = dst.projects || [];
+    const pOff = dst.projects.length;
+    for (const p of src.projects || []) { dst.projects.push(p.slice()); if (Array.isArray(D.p)) D.p.push(p[0]); }
+    const keys = Object.keys(C).filter(k => col(C, k));
+    for (let i = 0; i < M; i++) {
+      const [g, gn] = mapGroup(i);
+      for (const k of keys) {
+        let v;
+        if (k === 'ns') v = ns;
+        else if (k === 'p') v = col(SC, 'p') && SC.p[i] >= 0 ? pOff + SC.p[i] : -1;
+        else if (k === 'g') v = g;
+        else if (k === 'gn') v = gn;
+        else if (Array.isArray(D[k])) v = col(SC, k) && SC[k][i] >= 0 && SD[k] ? dictIdx(k, SD[k][SC[k][i]]) : -1;   // cột mã hóa theo từ điển
+        else if (k === 'p26' && quy) {
+          const f = factorOf(col(SC, 'y') ? SC.y[i] : null), t = col(SC, 'tot') ? SC.tot[i] : null;
+          v = f && t > 0 ? Math.round(t * f) : null;
+          if (v !== null) quyDoi++; else khongNam++;
+        }
+        else v = col(SC, k) ? SC[k][i] : null;
+        C[k].push(v);
+      }
+    }
+    dst.count = N0 + M;
+    return { dong: M, nhomChung: chung, nhomMoi: moi, lechNam: !!(src.baseYear && dst.baseYear && src.baseYear !== dst.baseYear), quyDoi, khongNam };
+  }
+  // Dòng thuộc nguồn đang bị tắt (f.srcOff: Set nhãn nguồn) — lọc cứng, không bao giờ nới
+  const srcOff = (IX, i, f) => !!(f.srcOff && f.srcOff.size && IX.has('ns') && f.srcOff.has(IX.D.ns[IX.C.ns[i]]));
+
   /* ---------- Thống kê giá nhóm theo bộ lọc ---------- */
-  // f: { yearFrom, yearTo, types:Set, provs:Set, excludeReview, excludeOutlier, excludeWarn }
+  // f: { yearFrom, yearTo, types:Set, provs:Set, excludeReview, excludeOutlier, excludeWarn, srcOff:Set }
   function rowPass(IX, i, f) {
     const { C, D, DB, has } = IX;
+    if (srcOff(IX, i, f)) return false;
     if (f.yearFrom && !((C.y[i] || 0) >= f.yearFrom)) return false;
     if (f.yearTo && !((C.y[i] || 9999) <= f.yearTo)) return false;
     if (f.excludeReview && has('st') && C.st[i] >= 0 && D.st[C.st[i]] === 'REVIEW') return false;
@@ -435,18 +547,23 @@
     }
     return true;
   }
-  function groupStats(IX, gid, f = {}, ratio = 1) {
-    const g = IX.groups[gid];
-    let ids = g.rows.filter(i => rowPass(IX, i, f));
+  // more: [{ g, ratio }] — nhóm gần giống gộp chung báo giá với nhóm chính (poolCands); ratio của từng nhóm quy về đơn vị dòng BOQ
+  function groupStats(IX, gid, f = {}, ratio = 1, more = []) {
+    const rate = new Map();
+    for (const p of [{ g: gid, ratio }, ...more]) for (const i of IX.groups[p.g].rows) if (!rate.has(i)) rate.set(i, p.ratio);
+    const rows = [...rate.keys()], adj = i => IX.price(i) * rate.get(i);
+    let ids = rows.filter(i => rowPass(IX, i, f));
     let relaxed = false;
-    if (!ids.length && g.rows.length) { ids = g.rows.filter(i => rowPass(IX, i, { excludeReview: f.excludeReview })); relaxed = true; }
-    if (!ids.length) { ids = g.rows.slice(); relaxed = true; }
-    const v = Float64Array.from(ids, i => IX.price(i) * ratio).sort();
+    // không còn mẫu: nới các bộ lọc khác, riêng nguồn đã tắt thì vẫn loại
+    if (!ids.length && rows.length) { ids = rows.filter(i => rowPass(IX, i, { excludeReview: f.excludeReview, srcOff: f.srcOff })); relaxed = true; }
+    if (!ids.length) { ids = rows.filter(i => !srcOff(IX, i, f)); relaxed = true; }
+    const v = Float64Array.from(ids, adj).sort();   // có thể rỗng khi mọi báo giá của nhóm thuộc nguồn đã tắt
     const { C, has } = IX;
     let latest = 0, latestPrice = null, sum = 0, mat = [], lab = [];
-    const proj = new Set();
+    const proj = new Set(), src = {};
     for (const i of ids) {
       if (has('p')) proj.add(C.p[i]);
+      if (has('ns')) { const l = IX.D.ns[C.ns[i]]; src[l] = (src[l] || 0) + 1; }
       const y = C.y[i] || 0;
       if (y > latest || (y === latest && latestPrice === null)) { latest = y; }
       const t = C.tot[i];
@@ -455,15 +572,52 @@
       }
     }
     for (const x of v) sum += x;
-    const recent = ids.filter(i => (C.y[i] || 0) === latest).map(i => IX.price(i) * ratio).sort((a, b) => a - b);
+    const recent = ids.filter(i => (C.y[i] || 0) === latest).map(adj).sort((a, b) => a - b);
     latestPrice = qtile(recent, 0.5);
     mat.sort((a, b) => a - b); lab.sort((a, b) => a - b);
     return {
-      ids, sorted: v, n: v.length, proj: proj.size, relaxed,
+      ids, sorted: v, n: v.length, proj: proj.size, relaxed, src, rate, pooled: more.length,
       med: qtile(v, 0.5), p10: qtile(v, 0.1), p25: qtile(v, 0.25), p75: qtile(v, 0.75), p90: qtile(v, 0.9),
       min: v[0], max: v[v.length - 1], mean: sum / (v.length || 1), latest, latestPrice,
       matShare: mat.length >= 2 ? qtile(mat, 0.5) : null, labShare: lab.length >= 2 ? qtile(lab, 0.5) : null,
     };
+  }
+  /* ---------- Gộp nhóm gần giống ---------- */
+  // Cùng một công việc thường có nhiều nhóm vì mỗi nguồn / dự án ghi tên khác nhau ("Bê tông lót M150" ở CTG,
+  // "Bê tông lót móng M150 đá 4x6" ở CSDL nội bộ). Gộp báo giá các nhóm khớp gần ngang nhóm chính để có nhiều mẫu hơn:
+  // • điểm khớp ≥ 0.75 và không kém nhóm chính quá 0.15;
+  // • đơn vị quy đổi được về đơn vị nhóm chính;
+  // • không lệch thông số: các con số trong tên nhóm này phải nằm trong tên nhóm kia (M150 ⊂ "M150 đá 4x6", nhưng
+  //   dày 100 ≠ dày 200), cùng loại thông số (mác, đường kính…) phải có giá trị chung;
+  // • không thiếu ý chính của mô tả: các từ của mô tả BOQ mà nhóm chính có, nhóm gộp cũng phải có (≥ 65% theo IDF);
+  // • không trái nghĩa (trong nhà / ngoài nhà, tròn / vuông, nóng / lạnh).
+  // Nhóm QS đã chọn / dữ liệu học không gộp (QS đã quyết định nhóm); nhóm được ưu tiên (g.boost: đơn giá bổ sung QS nạp
+  // cho chính dự án) dùng riêng, không gộp và không bị gộp. Tối đa 4 nhóm gộp thêm. -> [{ g, ratio }]
+  const OPPOSITE = [['noithat', 'ngoaithat'], ['tron', 'vuong'], ['nong', 'lanh']];
+  function numsCompatible(a, b) {
+    const sub = (p, q) => [...p].every(t => q.has(t));
+    if (a.nums.size && b.nums.size && !sub(a.nums, b.nums) && !sub(b.nums, a.nums)) return false;
+    for (const [k, vs] of Object.entries(a.attr)) { const w = b.attr[k]; if (w && ![...vs].some(v => w.has(v))) return false; }
+    return true;
+  }
+  function poolCands(IX, cands, k = 0, line = {}) {
+    const c = cands[k];
+    if (!c || c.picked || c.learned || c.unitOk === false || IX.groups[c.g].boost) return [];
+    const g = IX.groups[c.g], out = [];
+    const q = [...new Set(tokens(line.desc).concat(tokens(line.desc).length <= 4 ? tokens(line.near) : []))].filter(t => !/^\d/.test(t));
+    const qg = q.filter(t => g.tw.has(t)), wq = qg.reduce((a, t) => a + (IX.idf.get(t) || 0), 0);
+    const side = (grp, t) => grp.tw.has(t) || q.includes(t);
+    for (const x of cands) {
+      if (x === c || x.g === c.g || x.picked || x.learned || x.unitOk === false) continue;
+      if (x.score < 0.75 || x.score < c.score - 0.15) continue;
+      const h = IX.groups[x.g], r = unitRatio(h.unit, g.unit);
+      if (h.boost || r === null || !numsCompatible(g, h)) continue;
+      if (wq > 0 && qg.reduce((a, t) => a + (h.tw.has(t) ? IX.idf.get(t) || 0 : 0), 0) / wq < 0.65) continue;
+      if (OPPOSITE.some(([a, b]) => (side(g, a) && h.tw.has(b) && !h.tw.has(a)) || (side(g, b) && h.tw.has(a) && !h.tw.has(b)))) continue;
+      out.push({ g: x.g, ratio: x.unitOk === null ? r * c.ratio : x.ratio });
+      if (out.length >= 4) break;
+    }
+    return out;
   }
   const STRATEGY = {
     med: { label: 'Trung vị (P50)', pick: s => s.med },
@@ -674,5 +828,5 @@
     return { d, pct: baseline ? d / baseline : null, amt: isNum(qty) ? d * qty : null };
   }
 
-  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, diff, toNum, COLS, PROP_HEAD };
+  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, tagSource, mergeDB, yearFactors, poolCands, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, diff, toNum, COLS, PROP_HEAD };
 });

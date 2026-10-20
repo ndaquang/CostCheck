@@ -9,13 +9,26 @@ const arg = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null
 const args = k => argv.flatMap((a, i) => a === k && argv[i + 1] ? [path.resolve(argv[i + 1])] : []);
 const flag = k => argv.includes(k);
 
-// CSDL thật dạng data/db.js (window.DB = {...}) hoặc JSON; không truyền thì dùng CSDL giả lập của bộ chạy thử
-function loadDB(file) {
-  if (!file) return { db: require('../demo/du_lieu_mau.js').taoDB(), demo: true };
+const readJsObj = file => {
   const txt = fs.readFileSync(file, 'utf8');
   const a = txt.indexOf('{'), b = txt.lastIndexOf('}');
   if (a < 0 || b < a) throw new Error('Không đọc được CSDL ' + file);
-  return { db: JSON.parse(txt.slice(a, b + 1)), demo: false };
+  return JSON.parse(txt.slice(a, b + 1));
+};
+// CSDL thật dạng data/db.js (window.DB = {...}) hoặc JSON; không truyền thì dùng CSDL giả lập của bộ chạy thử.
+// --them <file.js>[=Nhãn] (lặp được): gộp thêm nguồn giá cùng định dạng (vd data/doithu.js = Đối thủ), như trang Điền giá BOQ.
+const NHAN = { doithu: 'Đối thủ', ctg: 'CTG' };
+function loadDB(file) {
+  const out = file ? { db: readJsObj(file), demo: false } : { db: require('../demo/du_lieu_mau.js').taoDB(), demo: true };
+  out.nguon = [];
+  argv.forEach((a, i) => {
+    if (a !== '--them' || !argv[i + 1]) return;
+    const [f, label] = argv[i + 1].split('=');
+    const base = path.basename(f).replace(/\.\w+$/, '');
+    const r = DXG.mergeDB(out.db, readJsObj(path.resolve(f)), label || NHAN[base.toLowerCase()] || base);
+    out.nguon.push({ file: path.basename(f), label: label || NHAN[base.toLowerCase()] || base, ...r });
+  });
+  return out;
 }
 const readXlsx = file => JSON.parse(execFileSync('python3', [path.join(__dirname, 'doc_xlsx.py'), file], { maxBuffer: 1 << 30 }).toString());
 function writeXlsx(report, file) {
