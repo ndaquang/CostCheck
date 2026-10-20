@@ -22,15 +22,16 @@ let DB, C, D, N;
 const ROLE = (window.SECURE && window.SECURE.role) || 'admin';
 // Bộ dữ liệu: 'noibo' (mặc định), 'ctg' (chiết tính giá — tách vật tư / nhân công) hoặc 'doithu' (đơn giá đối thủ).
 // CTG và đối thủ là dữ liệu độc lập, chỉ admin, chỉ tra cứu. RIENG = thông tin bộ riêng đang mở (null với dữ liệu nội bộ).
+// Chuyển bộ dữ liệu ngay trong trang (switchDS), không tải lại trang để giữ phiên đăng nhập.
 const DS_RIENG = {
-  ctg: { khoi: 'ctg', file: 'data/ctg.js', bien: 'CTG', title: 'CSDL chiết tính giá', ph: 'Tìm đơn giá chiết tính… vd: be tong lot, cot thep, xay tuong',
+  ctg: { khoi: 'ctg', file: 'data/ctg.js', bien: 'CTG', title: 'CSDL chiết tính giá', ph: 'Tìm đơn giá chiết tính… vd: be tong lot, cot thep, xay tuong', vtnc: true,
     tao: '<code>node modules/ctg/dong_goi.js --xlsx DATABASE_CTG.xlsx --js WEB/data/ctg.js</code>',
     thieu: 'Gói dữ liệu này chưa có CSDL chiết tính giá. Admin chạy: node modules/ctg/dong_goi.js --xlsx DATABASE_CTG.xlsx --goi <gói admin .dgbw> --user <admin>' },
   doithu: { khoi: 'doithu', file: 'data/doithu.js', bien: 'DT', title: 'Đơn giá đối thủ', ph: 'Tìm đơn giá đối thủ… vd: be tong lot, cot thep cot',
     tao: '<code>python build_data.py</code> trong thư mục WEB' },
 };
-const DS = (q => (q === 'ctg' || q === 'doithu' ? q : 'noibo'))(new URLSearchParams(location.search).get('ds'));
-const RIENG = DS_RIENG[DS] || null;
+let DS = (q => (q === 'ctg' || q === 'doithu' ? q : 'noibo'))(new URLSearchParams(location.search).get('ds'));
+let RIENG = DS_RIENG[DS] || null;
 if (RIENG && ROLE !== 'admin') location.replace('index.html');
 let nameNorm, docNorm;          // chuỗi đã chuẩn hóa theo dòng
 let vocab, postings;            // chỉ mục đảo: từ -> Int32Array(dòng*4 + trường)
@@ -41,38 +42,50 @@ const state = { q: '', sort: 'rel', pmin: null, pmax: null, par: false, split: f
 let result = { ids: new Int32Array(0), score: null, matched: new Set(), partial: false, groups: null };
 
 /* ---------- Nạp dữ liệu ---------- */
+// Một bộ dữ liệu → Promise(DB): qua window.SECURE (gói .dgbw), hoặc data/*.js khi chạy thử không qua cổng đăng nhập
+function loadData(ds) {
+  const R = DS_RIENG[ds];
+  if (window.SECURE) return window.SECURE.load(R ? R.khoi : 'db').then(txt => JSON.parse(txt));
+  return new Promise((ok, fail) => {
+    const s = document.createElement('script');
+    s.src = R ? R.file : 'data/db.js';
+    s.onload = () => ok(R ? window[R.bien] : window.DB);
+    s.onerror = () => fail(Object.assign(new Error('Không tìm thấy ' + (R ? R.file : 'data/db.js')), { code: 'THIEU_FILE' }));
+    document.body.appendChild(s);
+  });
+}
+const loiMo = (e, ds) => (e && e.code === 'THIEU_KHOI' && DS_RIENG[ds] && DS_RIENG[ds].thieu) || String(e && e.message || e);
 function boot() {
-  if (window.SECURE) {
-    $('#splash-msg').textContent = 'Đang giải mã dữ liệu…';
-    window.SECURE.load(RIENG ? RIENG.khoi : 'db').then(txt => { window.DB = JSON.parse(txt); $('#splash-msg').textContent = 'Đang lập chỉ mục tìm kiếm…'; setTimeout(init, 30); })
-      .catch(e => { $('#splash-msg').textContent = 'Không mở được dữ liệu'; $('#splash-err').textContent = (e && e.code === 'THIEU_KHOI' && RIENG && RIENG.thieu) || String(e && e.message || e); $('.bar').hidden = true; });
-    return;
-  }
-  const s = document.createElement('script');
-  s.src = RIENG ? RIENG.file : 'data/db.js';
-  s.onload = () => { if (RIENG) window.DB = window[RIENG.bien]; $('#splash-msg').textContent = 'Đang lập chỉ mục tìm kiếm…'; setTimeout(init, 30); };
-  s.onerror = () => {
-    $('#splash-msg').textContent = 'Không tìm thấy ' + (RIENG ? RIENG.file : 'data/db.js');
-    $('#splash-err').innerHTML = `Hãy chạy ${RIENG ? RIENG.tao : '<code>python build_data.py</code> trong thư mục WEB'} rồi mở lại trang.`;
-    $('.bar').hidden = true;
-  };
-  document.body.appendChild(s);
+  if (window.SECURE) $('#splash-msg').textContent = 'Đang giải mã dữ liệu…';
+  loadData(DS).then(db => { $('#splash-msg').textContent = 'Đang lập chỉ mục tìm kiếm…'; setTimeout(() => init(db), 30); })
+    .catch(e => {
+      if (e && e.code === 'THIEU_FILE') {
+        $('#splash-msg').textContent = e.message;
+        $('#splash-err').innerHTML = `Hãy chạy ${RIENG ? RIENG.tao : '<code>python build_data.py</code> trong thư mục WEB'} rồi mở lại trang.`;
+      } else { $('#splash-msg').textContent = 'Không mở được dữ liệu'; $('#splash-err').textContent = loiMo(e, DS); }
+      $('.bar').hidden = true;
+    });
 }
 
-function init() {
+function init(db) {
   const t0 = performance.now();
-  DB = window.DB; C = DB.cols; D = DB.dicts; N = DB.count;
-  buildIndex();
-  buildFacets();
-  if (RIENG) setupRieng();
-  $('#db-meta').textContent = `${NF.format(N)} đơn giá · ${NF.format(D.p.length)} dự án · ${NF.format(D.f.length)} file nguồn · cập nhật ${DB.built}`;
-  buildGroupIndex();
+  setupNav();
+  useDB(db);
   const sec = readHash();
   bindUI();
   run();
   $('#splash').remove();
   showSection(sec);
   console.log(`Khởi tạo ${Math.round(performance.now() - t0)} ms, ${vocab.length} từ trong chỉ mục`);
+}
+// Bật một bộ dữ liệu: chỉ mục tìm kiếm, bộ lọc, nhóm đại diện, giao diện của bộ đó
+function useDB(db) {
+  if (DS === 'noibo') window.DB = db;   // module Điền giá BOQ luôn dùng dữ liệu nội bộ qua window.DB
+  DB = db; C = DB.cols; D = DB.dicts; N = DB.count;
+  buildIndex();
+  buildFacets();
+  buildGroupIndex();
+  applyDS();
 }
 
 function buildIndex() {
@@ -437,15 +450,15 @@ function toggleGroup(el) {
   body.hidden = !open; el.classList.toggle('open', open);
   if (open && !body.dataset.ready) { body.dataset.ready = 1; body.innerHTML = groupBody(e); e.detailShown = 0; appendDetails(el, e); }
 }
-const VT_NC = DS === 'ctg';   // CSDL chiết tính giá: hiện thêm vật tư / nhân công
+const vtNc = () => !!(RIENG && RIENG.vtnc);   // CSDL chiết tính giá: hiện thêm vật tư / nhân công
 function medianOf(col, ids) { const v = ids.map(i => col[i]).filter(x => x !== null && x !== undefined).sort((a, b) => a - b); return v.length ? qtile(v, .5) : null; }
 function groupBody(e) {
   const s = e.st;
   const chip = (k, v) => `<span class="gs"><i>${k}</i> ${v}</span>`;
-  return `<div class="gsum">${chip('Đại diện', `<b>${money(s.med)}</b>`)}${VT_NC ? chip('Vật tư', money(medianOf(C.mat, e.ids))) + chip('Nhân công', money(medianOf(C.lab, e.ids))) : ''}${chip('Trung bình', money(s.mean))}${chip('Phổ biến', `${money(s.p25)} – ${money(s.p75)}`)}${chip('Thấp – cao', `${money(s.min)} – ${money(s.max)}`)}${chip('Báo giá', NF.format(s.n))}${chip('Dự án', s.proj)}${chip('Mới nhất', s.latest)}${s.variants > 1 ? chip('Tên biến thể', s.variants) : ''}
+  return `<div class="gsum">${chip('Đại diện', `<b>${money(s.med)}</b>`)}${vtNc() ? chip('Vật tư', money(medianOf(C.mat, e.ids))) + chip('Nhân công', money(medianOf(C.lab, e.ids))) : ''}${chip('Trung bình', money(s.mean))}${chip('Phổ biến', `${money(s.p25)} – ${money(s.p75)}`)}${chip('Thấp – cao', `${money(s.min)} – ${money(s.max)}`)}${chip('Báo giá', NF.format(s.n))}${chip('Dự án', s.proj)}${chip('Mới nhất', s.latest)}${s.variants > 1 ? chip('Tên biến thể', s.variants) : ''}
     ${e.g >= 0 ? `<button class="link" data-drop="${e.g}">Xem điểm rơi giá →</button>` : ''}</div>
-    <div class="small muted" style="margin:4px 0 6px">${C.p26 || C.cp ? `Giá quy về mặt bằng ${DB.baseYear || 2026}` : 'Giá gốc theo từng báo giá (chưa quy đổi theo năm)'}${VT_NC ? ', vật tư / nhân công là trung vị riêng từng phần' : ''}; tính trên các dòng đang lọc. Bấm 1 dòng để xem đủ thông tin.</div>
-    <div class="tbl-wrap"><table class="dtl"><thead><tr><th class="num">Năm</th><th>Dự án</th><th>Tên công việc (gốc trong BOQ)</th>${VT_NC ? '<th class="num">Vật tư</th><th class="num">Nhân công</th>' : ''}<th class="num">Đơn giá gốc</th></tr></thead><tbody></tbody></table></div>
+    <div class="small muted" style="margin:4px 0 6px">${C.p26 || C.cp ? `Giá quy về mặt bằng ${DB.baseYear || 2026}` : 'Giá gốc theo từng báo giá (chưa quy đổi theo năm)'}${vtNc() ? ', vật tư / nhân công là trung vị riêng từng phần' : ''}; tính trên các dòng đang lọc. Bấm 1 dòng để xem đủ thông tin.</div>
+    <div class="tbl-wrap"><table class="dtl"><thead><tr><th class="num">Năm</th><th>Dự án</th><th>Tên công việc (gốc trong BOQ)</th>${vtNc() ? '<th class="num">Vật tư</th><th class="num">Nhân công</th>' : ''}<th class="num">Đơn giá gốc</th></tr></thead><tbody></tbody></table></div>
     <div class="dmore"></div>`;
 }
 function appendDetails(el, e) {
@@ -456,7 +469,7 @@ function appendDetails(el, e) {
     if (ROLE === 'nhan_vien') p[1] = p[2] || '';   // không hiện mã/tên dự án cho nhân viên
     const adj = p26(i), base = C.cp ? C.cp[i] : C.tot[i];
     return `<tr data-row="${i}"><td class="num">${C.y[i] || ''}</td><td>${esc(p[1] || '')}<div class="price-sub">${esc(p[4] || p[3] || '')}</div></td>
-      <td>${hl(C.name[i])}${loc ? `<div class="price-sub">@ ${esc(loc)}</div>` : ''}</td>${VT_NC ? `<td class="num">${fmt(C.mat[i])}</td><td class="num">${fmt(C.lab[i])}</td>` : ''}
+      <td>${hl(C.name[i])}${loc ? `<div class="price-sub">@ ${esc(loc)}</div>` : ''}</td>${vtNc() ? `<td class="num">${fmt(C.mat[i])}</td><td class="num">${fmt(C.lab[i])}</td>` : ''}
       <td class="num"><b>${fmt(C.tot[i])}</b> <span class="small muted">/${esc(unitOf(i))}</span> ${flags(i)}${Math.abs(adj - base) > 0.5 || unitOf(i) !== e.unit ? `<div class="price-sub">≈ ${money(adj)} /${esc(e.unit)} (${DB.baseYear || 2026})</div>` : ''}</td></tr>`;
   }).join(''));
   e.detailShown = to;
@@ -680,15 +693,52 @@ function renderDrop() {
   writeHash();
 }
 
-/* ---------- Chế độ bộ dữ liệu riêng (CTG, đối thủ) ---------- */
-function setupRieng() {
-  document.documentElement.classList.add('ds-' + DS);
-  document.title = RIENG.title;
-  const t = document.querySelector('.brand .title'); if (t) t.textContent = RIENG.title;
-  const nav = document.querySelector('.topnav');
-  if (nav) nav.innerHTML = [['', 'Dữ liệu nội bộ'], ['ctg', 'CTG'], ['doithu', 'Đối thủ']]
-    .map(([k, l]) => `<a href="index.html${k ? '?ds=' + k : ''}"${k === DS ? ' class="on"' : ''}>${l}</a>`).join('');
-  $('#q').placeholder = RIENG.ph;
+/* ---------- Chuyển bộ dữ liệu (nội bộ / CTG / đối thủ) ngay trong trang ---------- */
+// Không tải lại trang: khóa giải mã chỉ nằm trong bộ nhớ của trang, tải lại là đăng xuất.
+// Bộ đã mở được giữ nguyên (chỉ mục, bộ lọc đang chọn) để chuyển qua lại không phải giải mã lại; đăng xuất xóa hết.
+const GOC = {};     // tiêu đề, gợi ý ô tìm của dữ liệu nội bộ
+const CACHE = {};   // ds -> trạng thái bộ đã mở
+const chup = () => ({ DB, C, D, N, nameNorm, docNorm, vocab, postings, parVocab, parPost, parRows, FACETS, G_ROWS, G_NAME, G_UNIT });
+let dangChuyen = false;
+function setupNav() {
+  const t = $('.brand .title');
+  Object.assign(GOC, { title: document.title, brand: t ? t.textContent : document.title, ph: $('#q').placeholder });
+  const nav = $('.topnav');
+  if (!nav) return;
+  const ctg = $('.nav-ctg', nav), dt = $('.nav-dt', nav);
+  if (ctg) ctg.dataset.ds = 'ctg';
+  if (dt) dt.dataset.ds = 'doithu';
+  const a = document.createElement('a');
+  a.href = 'index.html'; a.className = 'nav-noibo'; a.dataset.ds = 'noibo'; a.textContent = 'Dữ liệu nội bộ';
+  nav.insertBefore(a, ctg || dt);
+}
+function applyDS() {
+  const root = document.documentElement;
+  root.classList.remove('ds-ctg', 'ds-doithu');
+  if (RIENG) root.classList.add('ds-' + DS);
+  document.title = RIENG ? RIENG.title : GOC.title;
+  const t = $('.brand .title'); if (t) t.textContent = RIENG ? RIENG.title : GOC.brand;
+  $('#q').placeholder = RIENG ? RIENG.ph : GOC.ph;
+  $$('.topnav [data-sec]').forEach(a => { a.hidden = !!RIENG; });   // bộ riêng: chỉ tra cứu
+  $$('.topnav [data-ds]').forEach(a => { a.classList.toggle('on', a.dataset.ds === DS); if (a.dataset.ds === 'noibo') a.hidden = !RIENG; });
+  $('#db-meta').textContent = `${NF.format(N)} đơn giá · ${NF.format(D.p.length)} dự án · ${NF.format(D.f.length)} file nguồn · cập nhật ${DB.built}`;
+}
+function switchDS(ds) {
+  if (ds === DS || dangChuyen || (DS_RIENG[ds] && ROLE !== 'admin')) return;
+  dangChuyen = true;
+  closeDrawer();
+  if (SECTION !== 'tra-cuu') $('.topnav [data-sec="tra-cuu"]').click();   // rời Điểm rơi / Phân tích / Điền giá BOQ (module tự ẩn mục của nó)
+  if (!CACHE[ds]) toast(`Đang mở ${(DS_RIENG[ds] || { title: 'dữ liệu nội bộ' }).title}…`);
+  (CACHE[ds] ? Promise.resolve(null) : loadData(ds)).then(db => {
+    CACHE[DS] = chup();
+    DS = ds; RIENG = DS_RIENG[ds] || null;
+    if (db) useDB(db);
+    else { ({ DB, C, D, N, nameNorm, docNorm, vocab, postings, parVocab, parPost, parRows, FACETS, G_ROWS, G_NAME, G_UNIT } = CACHE[ds]); applyDS(); }
+    expCache.clear(); DROP.g = null; DROP.top = null; lastSearchQ = null;
+    $('#toast').hidden = true;
+    run();
+    window.scrollTo({ top: 0 });
+  }).catch(e => toast(loiMo(e, ds))).finally(() => { dangChuyen = false; });
 }
 
 /* ---------- Mục (section) ---------- */
@@ -719,8 +769,8 @@ function writeHash() {
   if (state.pmax !== null) p.set('pmax', state.pmax);
   for (const k of ['par', 'split', 'nowarn']) if (state[k]) p.set(k, 1);
   for (const f of FACETS) if (f.sel.size) p.set('f.' + f.key, [...f.sel].map(v => f.labels[v]).join('|'));
-  const h = p.toString();
-  try { history.replaceState(null, '', h ? '#' + h : location.pathname + location.search); } catch (e) { }
+  const h = p.toString(), url = location.pathname + (RIENG ? '?ds=' + DS : '');   // ?ds= theo bộ đang mở
+  try { history.replaceState(null, '', h ? url + '#' + h : url); } catch (e) { }
 }
 function readHash() {
   const p = new URLSearchParams(location.hash.slice(1));
@@ -759,6 +809,7 @@ function bindUI() {
     if (!e.target.closest('#help, #help-btn')) $('#help').hidden = true;
     const d = e.target.closest('[data-drop]'); if (d) { e.preventDefault(); openDrop(+d.dataset.drop); }
     const s = e.target.closest('.topnav [data-sec]'); if (s) { e.preventDefault(); showSection(s.dataset.sec); }
+    const ds = e.target.closest('.topnav [data-ds]'); if (ds) { e.preventDefault(); switchDS(ds.dataset.ds); }
   });
 
   $('#sort').onchange = e => { state.sort = e.target.value; run(); };

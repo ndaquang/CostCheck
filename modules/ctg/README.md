@@ -38,7 +38,13 @@ Dòng còn chi tiết: Mã gốc, Mã công tác link (hiện ở "Mã dòng"), 
 
 ## Mở trên web
 
-Đăng nhập bằng gói admin, rồi bấm **CTG** trên thanh điều hướng. Giống mục Đối thủ, CTG mở thành trang riêng (`index.html?ds=ctg`), nên phải đăng nhập lại một lần. Nếu gói chưa có khối `ctg`, trang báo lệnh cần chạy.
+Đăng nhập một lần bằng gói admin, rồi bấm **CTG** / **Đối thủ** / **Dữ liệu nội bộ** trên thanh điều hướng.
+
+- Bộ dữ liệu được chuyển **ngay trong trang**, không tải lại trang, nên **không bị đăng xuất**. Khóa giải mã chỉ nằm trong bộ nhớ của trang, nên tải lại trang vẫn là đăng xuất.
+- Bộ nào mở lần đầu thì được giải mã một lần (CTG thật: khoảng 0,7 giây). Các lần chuyển sau gần như tức thì. Từ khóa đang tìm được giữ lại, bộ lọc của từng bộ dữ liệu cũng giữ nguyên. Đăng xuất là xóa hết.
+- Địa chỉ trang ghi `?ds=ctg` / `?ds=doithu`, nên tải lại trang rồi đăng nhập thì mở đúng bộ đang xem.
+- Mục **Điền giá BOQ** luôn lấy giá từ dữ liệu nội bộ. Mục này bị ẩn khi đang xem CTG hoặc Đối thủ.
+- Nếu gói chưa có khối `ctg`, bấm CTG sẽ báo lệnh cần chạy và vẫn ở lại dữ liệu nội bộ.
 
 Chạy thử không qua cổng đăng nhập:
 
@@ -50,7 +56,7 @@ Sau đó mở `WEB/index.html?ds=ctg`. **Không đưa file `ctg.js` lên GitHub.
 
 ## Mã app và build.py
 
-- Mục CTG nằm trong `docs/assets/app.js` và `docs/assets/app.css`. App đọc bộ dữ liệu theo `?ds=` qua bảng `DS_RIENG`.
+- Mục CTG nằm trong `docs/assets/app.js` và `docs/assets/app.css`. Bảng `DS_RIENG` khai báo các bộ dữ liệu; `switchDS` chuyển bộ ngay trong trang.
 - `docs/` được dựng lại từ `WEB/assets`. Trước lần chạy `python build.py` đầy đủ đầu tiên, phải **chép `docs/assets/app.js` và `docs/assets/app.css` sang `WEB/assets/`**. Nếu WEB chưa có CTG, `build.py` dừng lại để bản dựng mới không mất mục CTG.
 - `build.py` tự thêm liên kết CTG trên thanh điều hướng nếu `WEB/index.html` chưa có.
 - `shared/secure.js` báo riêng lỗi "gói không có khối …". App dùng lỗi này để hướng dẫn admin thêm khối `ctg`.
@@ -59,7 +65,7 @@ Sau đó mở `WEB/index.html?ds=ctg`. **Không đưa file `ctg.js` lên GitHub.
 
 ```
 node modules/ctg/tests/test_ctg.js [thư mục tạm]   # chuyển dữ liệu, NRM2, đơn vị, gói khối ctg (giải mã lại bằng WebCrypto), lệnh dong_goi.js
-node modules/ctg/tests/e2e_ctg.js <thư mục tạm>    # Chromium trên docs/: admin / nhân viên, gói thiếu khối ctg, xuất Excel
+node modules/ctg/tests/e2e_ctg.js <thư mục tạm>    # Chromium trên docs/: chuyển nội bộ / CTG / đối thủ không đăng nhập lại, admin / nhân viên, gói thiếu khối ctg
 ```
 
 Mọi dữ liệu trong `tests/` là giả lập.

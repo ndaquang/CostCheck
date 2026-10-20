@@ -1,7 +1,8 @@
 'use strict';
 /* Kiểm thử bản đã dựng docs/ với gói .dgbw có khối "ctg" (Chromium, CSP + cổng đăng nhập thật):
-   • admin: thanh điều hướng có "CTG"; mở index.html?ds=ctg → CSDL chiết tính giá, tra cứu, vật tư / nhân công, xuất Excel;
-     không có mục Điền giá BOQ; gói chưa có khối ctg → báo cách thêm.
+   • admin: đăng nhập MỘT lần, chuyển qua lại Dữ liệu nội bộ / CTG / Đối thủ ngay trong trang (không tải lại, không đăng nhập lại);
+     CTG: tra cứu, vật tư / nhân công, xuất Excel; mục Điền giá BOQ vẫn dùng dữ liệu nội bộ; gói chưa có khối ctg → báo cách thêm.
+   • mở thẳng index.html?ds=ctg (sau khi tải lại trang) vẫn chạy, chuyển về dữ liệu nội bộ có đủ các mục.
    • nhân viên: không thấy "CTG", mở thẳng ?ds=ctg bị đưa về dữ liệu nội bộ.
    Dùng: node modules/ctg/tests/e2e_ctg.js <thư mục tạm>. Gói dữ liệu là giả lập. */
 const fs = require('fs'), path = require('path'), http = require('http'), os = require('os');
@@ -31,29 +32,36 @@ const login = async (page, url, goi, user, doi = true) => {
   await page.click('#gate-go');
   if (doi) await page.waitForSelector('#splash', { state: 'detached', timeout: 20000 });
 };
+const navHien = page => page.$$eval('.topnav a', as => as.filter(a => a.offsetParent).map(a => a.textContent.trim() + (a.dataset.ds && a.classList.contains('on') ? '*' : '')).join(' | '));
+const chuyen = async (page, sel, tieuDe) => { await page.click(sel); await page.waitForFunction(t => document.querySelector('.brand .title').textContent === t, tieuDe, { timeout: 20000 }); await page.waitForTimeout(300); };
+let DXG_NOI_BO;   // module Điền giá BOQ đã khởi tạo trên dữ liệu nội bộ (loại hình dự án của CSDL giả lập)
 let fails = 0; const check = (ok, text) => { console.log(`  ${ok ? '✓' : '✗'} ${text}`); if (!ok) fails++; };
 
 (async () => {
-  const goc = await goiMau({ db: [fullDB(makeDB()), 'nv'] });
+  const noiBo = fullDB(makeDB()), doiThu = fullDB(makeDB());
+  doiThu.cols.name = doiThu.cols.name.map(n => n + ' (đối thủ)'); doiThu.dicts.gn = doiThu.dicts.gn.map(n => n + ' (đối thủ)');
+  const goc = await goiMau({ db: [noiBo, 'nv'], doithu: [doiThu, 'admin'] });
   const coCTG = path.join(WORK, 'admin_ctg.dgbw'), khongCTG = path.join(WORK, 'admin.dgbw');
   fs.writeFileSync(khongCTG, JSON.stringify(goc));
   fs.writeFileSync(coCTG, JSON.stringify(goiCTG(goc, taoCSDL(luoiMau()).db, 'admin', 'matkhau')));
   const srv = serve(DOCS), base = `http://127.0.0.1:${srv.address().port}/index.html`;
   const browser = await pw.chromium.launch();
 
-  console.log('admin');
+  console.log('admin: chuyển bộ dữ liệu ngay trong trang');
   const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 1360, height: 900 } });
   const errs = []; page.on('pageerror', e => errs.push(e.message)); page.on('console', m => { if (['error', 'warning'].includes(m.type()) && /Content Security|Refused|Error/i.test(m.text())) errs.push(m.text()); });
+  let taiTrang = 0; page.on('load', () => taiTrang++);
   await login(page, base, coCTG, 'admin');
-  const navs = await page.$$eval('.topnav a', as => as.filter(a => a.offsetParent).map(a => a.textContent.trim()));
-  check(navs.includes('CTG') && navs.indexOf('CTG') === navs.indexOf('Đối thủ') - 1, 'dữ liệu nội bộ: thanh điều hướng có "CTG" trước "Đối thủ": ' + navs.join(' | '));
-  await Promise.all([page.waitForNavigation(), page.click('.topnav a.nav-ctg')]);
-  check(/\?ds=ctg$/.test(page.url()), 'bấm CTG → ' + page.url().replace(/^.*\//, ''));
-  await login(page, page.url(), coCTG, 'admin');
-  check((await page.textContent('.brand .title')).trim() === 'CSDL chiết tính giá' && await page.evaluate(() => document.documentElement.classList.contains('ds-ctg')), 'tiêu đề "CSDL chiết tính giá"');
-  const navs2 = await page.$$eval('.topnav a', as => as.map(a => a.textContent.trim() + (a.classList.contains('on') ? '*' : '')));
-  check(navs2.join('|') === 'Dữ liệu nội bộ|CTG*|Đối thủ', 'chuyển bộ dữ liệu: ' + navs2.join(' | '));
-  check(!(await page.$('#sec-dxg')) && await page.isHidden('#sec-drop') && await page.isHidden('#sec-analysis'), 'chỉ tra cứu: không có Điền giá BOQ / Điểm rơi / Phân tích');
+  taiTrang = 0;
+  check(await navHien(page) === 'Tra cứu | Điểm rơi giá | Phân tích | Điền giá BOQ | CTG | Đối thủ', 'dữ liệu nội bộ: ' + await navHien(page));
+  await page.fill('#q', 'be tong'); await page.waitForTimeout(400);
+
+  await chuyen(page, '.topnav a.nav-ctg', 'CSDL chiết tính giá');
+  check(taiTrang === 0 && !(await page.$('#gate')), 'bấm CTG: không tải lại trang, không đăng nhập lại');
+  check(/\?ds=ctg(#|$)/.test(page.url()) && await page.evaluate(() => document.documentElement.classList.contains('ds-ctg')), 'địa chỉ trang ghi ?ds=ctg: ' + page.url().replace(/^.*\//, ''));
+  check(await navHien(page) === 'Dữ liệu nội bộ | CTG* | Đối thủ', 'thanh điều hướng: ' + await navHien(page));
+  check(await page.isHidden('#sec-drop') && await page.isHidden('#sec-analysis') && await page.isHidden('#sec-dxg'), 'chỉ tra cứu: Điền giá BOQ / Điểm rơi / Phân tích ẩn');
+  check(await page.inputValue('#q') === 'be tong' && /cho “be tong”/.test(await page.textContent('#count')), 'giữ từ khóa đang tìm khi chuyển: ' + (await page.textContent('#count')).trim());
   const meta = (await page.textContent('#db-meta')).trim();
   check(/^66 đơn giá · 4 dự án · 4 file nguồn · cập nhật \d\d\/\d\d\/\d{4} \d\d:\d\d$/.test(meta), 'thông tin CSDL: ' + meta);
   check(await page.$$eval('#facets .opt .lbl', ls => ls.some(l => l.textContent === '11 · Bê tông đổ tại chỗ')) && await page.$$eval('#facets .grp-h2', hs => hs.some(h => h.textContent === 'KẾT CẤU')), 'bộ lọc Nhóm công việc NRM2 theo nhóm');
@@ -79,21 +87,64 @@ let fails = 0; const check = (ok, text) => { console.log(`  ${ok ? '✓' : '✗'
   const xl = path.join(WORK, dl.suggestedFilename()); await dl.saveAs(xl);
   const hd = execFileSync('python3', ['-c', 'from openpyxl import load_workbook as L;import sys;w=L(sys.argv[1]);print(w["TONG_HOP"]["C1"].value, "|", w["CHI_TIET"]["C1"].value, "|", w["CHI_TIET"]["L1"].value, w["CHI_TIET"]["M1"].value)', xl]).toString().trim();
   check(hd === 'Đơn giá đại diện | Đơn giá | Đơn giá VL Đơn giá NC', 'xuất Excel: ' + hd);
-  check(await page.getAttribute('.topnav a:last-child', 'href') === 'index.html?ds=doithu', 'liên kết sang Đối thủ');
-  if (errs.length) { console.error('  LỖI:', errs); fails++; }
+  await page.click('#facets .opt input');   // chọn 1 bộ lọc: quay lại CTG vẫn còn
+  await page.waitForTimeout(300);
+  const demCTG = (await page.textContent('#count')).trim();
 
-  console.log('admin, gói chưa có khối ctg');
+  await chuyen(page, '.topnav a.nav-dt', 'Đơn giá đối thủ');
+  check(taiTrang === 0 && !(await page.$('#gate')), 'bấm Đối thủ: không tải lại trang, không đăng nhập lại');
+  check(await navHien(page) === 'Dữ liệu nội bộ | CTG | Đối thủ*' && /\?ds=doithu(#|$)/.test(page.url()), 'đối thủ: ' + await navHien(page));
+  await page.fill('#q', ''); await page.waitForTimeout(400);
+  check(await page.$$eval('#glist .gname', ns => ns.length > 0 && ns.every(n => /đối thủ/.test(n.textContent))), 'hiện dữ liệu đối thủ');
+  await page.click('#glist .grp-h'); await page.waitForSelector('#glist .grp-b:not([hidden]) tbody tr');
+  check(!(await page.$$eval('#glist table.dtl th', t => t.some(x => x.textContent === 'Vật tư'))), 'đối thủ không có cột vật tư / nhân công');
+
+  const t0 = Date.now();
+  await chuyen(page, '.topnav a.nav-ctg', 'CSDL chiết tính giá');
+  await page.fill('#q', 'bê tông lót'); await page.waitForTimeout(500);
+  check((await page.textContent('#count')).trim() === demCTG && await page.$$eval('#facets .opt input:checked', i => i.length) === 1, `quay lại CTG: giữ bộ lọc đã chọn, không giải mã lại (${Date.now() - t0} ms): ${demCTG}`);
+
+  await chuyen(page, '.topnav a.nav-noibo', 'Đơn giá BOQ');
+  check(taiTrang === 0 && await navHien(page) === 'Tra cứu | Điểm rơi giá | Phân tích | Điền giá BOQ | CTG | Đối thủ' && !/ds=/.test(page.url()), 'về dữ liệu nội bộ: ' + await navHien(page));
+  await page.click('.topnav [data-sec="dien-gia"]');
+  await page.waitForSelector('#sec-dxg:not([hidden])');
+  DXG_NOI_BO = () => /Nhà xưởng/.test(document.querySelector('#o-type .msel-list').textContent) && window.DB.cols.name[0] === window.DB.cols.name[0].replace(' (đối thủ)', '');
+  await page.waitForFunction(DXG_NOI_BO);
+  check(await page.evaluate(n => window.DB.count === n, noiBo.count), 'Điền giá BOQ dùng dữ liệu nội bộ (loại hình dự án: ' + (await page.textContent('#o-type .msel-list')).trim().replace(/\s+/g, ', ') + ')');
+  await chuyen(page, '.topnav a.nav-ctg', 'CSDL chiết tính giá');
+  check(await page.isHidden('#sec-dxg') && !(await page.isHidden('#sec-search')), 'đang ở Điền giá BOQ bấm CTG → ẩn Điền giá, mở tra cứu CTG');
+  await chuyen(page, '.topnav a.nav-noibo', 'Đơn giá BOQ');
+  check(taiTrang === 0 && !(await page.$('#gate')), 'cả phiên chỉ đăng nhập 1 lần, không tải lại trang');
+  if (errs.length) { console.error('  LỖI:', errs); fails++; }
+  await page.close();
+
+  console.log('admin: gói chưa có khối ctg');
   const p3 = await browser.newPage();
+  await login(p3, base, khongCTG, 'admin');
+  await p3.click('.topnav a.nav-ctg');
+  await p3.waitForFunction(() => /chưa có CSDL chiết tính giá/.test(document.querySelector('#toast').textContent));
+  check((await p3.textContent('.brand .title')) === 'Đơn giá BOQ' && /dong_goi\.js/.test(await p3.textContent('#toast')), 'báo cách thêm, vẫn ở dữ liệu nội bộ: ' + (await p3.textContent('#toast')).slice(0, 60) + '…');
   await login(p3, base + '?ds=ctg', khongCTG, 'admin', false);
   await p3.waitForFunction(() => document.querySelector('#splash-err') && document.querySelector('#splash-err').textContent);
-  check(/chưa có CSDL chiết tính giá.*dong_goi\.js/.test(await p3.textContent('#splash-err')), 'báo cách thêm: ' + (await p3.textContent('#splash-err')).slice(0, 70) + '…');
+  check(/chưa có CSDL chiết tính giá.*dong_goi\.js/.test(await p3.textContent('#splash-err')), 'mở thẳng ?ds=ctg: báo cách thêm');
   await p3.close();
+
+  console.log('admin: mở thẳng ?ds=ctg (sau khi tải lại trang)');
+  const p4 = await browser.newPage();
+  await login(p4, base + '?ds=ctg', coCTG, 'admin');
+  check((await p4.textContent('.brand .title')) === 'CSDL chiết tính giá' && await navHien(p4) === 'Dữ liệu nội bộ | CTG* | Đối thủ', 'mở CTG: ' + await navHien(p4));
+  await chuyen(p4, '.topnav a.nav-noibo', 'Đơn giá BOQ');
+  await p4.click('.topnav [data-sec="dien-gia"]');
+  await p4.waitForSelector('#sec-dxg:not([hidden])');
+  await p4.waitForFunction(DXG_NOI_BO);
+  check(await p4.evaluate(n => window.DB.count === n, noiBo.count), 'chuyển về dữ liệu nội bộ: có Điền giá BOQ, dùng dữ liệu nội bộ');
+  await p4.close();
 
   console.log('nhân viên');
   const p2 = await browser.newPage();
   await login(p2, base, coCTG, 'nv1');
-  const navs3 = await p2.$$eval('.topnav a', as => as.filter(a => a.offsetParent).map(a => a.textContent.trim()));
-  check(!navs3.includes('CTG') && !navs3.includes('Đối thủ'), 'không thấy CTG / Đối thủ: ' + navs3.join(' | '));
+  const navs3 = await navHien(p2);
+  check(navs3 === 'Tra cứu', 'không thấy CTG / Đối thủ: ' + navs3);
   await login(p2, base + '?ds=ctg', coCTG, 'nv1', false);
   await p2.waitForURL(u => !/ds=ctg/.test(u.toString()), { timeout: 10000 }).catch(() => {});
   check(!/ds=ctg/.test(p2.url()) && await p2.isVisible('#gate'), 'mở thẳng ?ds=ctg → về trang dữ liệu nội bộ: ' + p2.url().replace(/^.*\//, ''));
