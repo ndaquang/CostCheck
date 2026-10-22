@@ -16,19 +16,34 @@ const KHOI = 'ctg';
 const MAGIC = Buffer.from('DGW1');
 
 /* ---------- Mã hóa: cùng định dạng shared/crypto-web.js ---------- */
-function moKhoaAdmin(pkg, ten, matKhau) {
+function timTaiKhoan(pkg, ten) {
   if (!pkg || pkg.dinh_dang !== 'DGW1' || !Array.isArray(pkg.users) || !pkg.khoi) throw new Error('Tệp này không phải gói dữ liệu của phần mềm.');
   const u = pkg.users.find(x => String(x.ten_dang_nhap).toLowerCase() === String(ten).toLowerCase());
   if (!u) throw new Error(`Gói không có tài khoản "${ten}".`);
   if (!u.hoat_dong) throw new Error(`Tài khoản "${u.ten_dang_nhap}" đang bị khóa.`);
-  if (!u.khoa || !u.khoa.admin) throw new Error(`"${u.ten_dang_nhap}" không có khóa admin trong gói này (tài khoản nhân viên, hoặc đây là gói nhân viên).`);
+  return u;
+}
+// Mở các khóa (nv, admin) mà tài khoản có trong gói bằng mật khẩu. -> { nv?: Buffer, admin?: Buffer }
+function moKhoa(pkg, ten, matKhau) {
+  const u = timTaiKhoan(pkg, ten);
   const kek = crypto.pbkdf2Sync(matKhau, Buffer.from(u.salt, 'base64'), u.kdf.iter, 32, 'sha256');
-  const raw = Buffer.from(u.khoa.admin, 'base64');
-  const d = crypto.createDecipheriv('aes-256-gcm', kek, raw.subarray(0, 12));
-  d.setAAD(Buffer.from(`${u.ten_dang_nhap}|admin`));
-  d.setAuthTag(raw.subarray(raw.length - 16));
-  try { return Buffer.concat([d.update(raw.subarray(12, raw.length - 16)), d.final()]); }
-  catch { throw new Error('Sai mật khẩu.'); }
+  const out = {};
+  for (const [k, w] of Object.entries(u.khoa || {})) {
+    const raw = Buffer.from(w, 'base64');
+    const d = crypto.createDecipheriv('aes-256-gcm', kek, raw.subarray(0, 12));
+    d.setAAD(Buffer.from(`${u.ten_dang_nhap}|${k}`));
+    d.setAuthTag(raw.subarray(raw.length - 16));
+    try { out[k] = Buffer.concat([d.update(raw.subarray(12, raw.length - 16)), d.final()]); }
+    catch { throw new Error('Sai mật khẩu.'); }
+  }
+  return out;
+}
+function moKhoaAdmin(pkg, ten, matKhau) {
+  const u = timTaiKhoan(pkg, ten);
+  if (!u.khoa || !u.khoa.admin) throw new Error(`"${u.ten_dang_nhap}" không có khóa admin trong gói này (tài khoản nhân viên, hoặc đây là gói nhân viên).`);
+  const k = moKhoa(pkg, ten, matKhau);
+  if (k.nv) k.nv.fill(0);
+  return k.admin;
 }
 function maHoaKhoi(obj, key, kind) {
   const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -130,4 +145,4 @@ async function main() {
 
 if (require.main === module) main().catch(e => { console.error('DỪNG: ' + (e && e.message || e)); process.exit(1); });
 
-module.exports = { moKhoaAdmin, maHoaKhoi, giaiKhoi, goiCTG, KHOI };
+module.exports = { moKhoa, moKhoaAdmin, maHoaKhoi, giaiKhoi, goiCTG, hoiMatKhau, KHOI };

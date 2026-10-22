@@ -5,6 +5,9 @@
                                                    [--baseline <file.xlsx>] [--db <db.js>] [--pick p25|p10|med|latest] [--out <thư mục>]
                                                    [--mode col|rate]   col (mặc định): giá đề xuất vào cột riêng tô màu; rate: vào ô Đơn giá trống
                                                    [--them data/doithu.js ...]  thêm nguồn giá (file gán window.DT / window.CTG), gộp như trang web
+                                                   [--du-lieu 3_WEB_OFFLINE/data]  db.js + doithu.js (+ ctg.js): đủ ba nguồn Nội bộ, CTG, Đối thủ
+                                                   [--goi DonGiaBOQ_admin.dgbw --user <admin>]  đọc thẳng các khối db, doithu, ctg của gói
+                                                     (mật khẩu: DGW_MAT_KHAU hoặc hỏi khi chạy; dữ liệu giải mã chỉ nằm tạm trong thư mục kết quả, xóa khi xong)
    Kết quả: <tên>_DaDienGia.xlsx (BOQ có giá đề xuất, không thêm sheet), KET_QUA.xlsx (báo cáo riêng), ảnh giao diện. */
 const fs = require('fs'), path = require('path'), http = require('http');
 const { execFileSync } = require('child_process');
@@ -25,8 +28,15 @@ fs.rmSync(SITE, { recursive: true, force: true });
 fs.mkdirSync(path.join(SITE, 'data'), { recursive: true });
 fs.cpSync(path.join(MOD, 'assets'), path.join(SITE, 'assets'), { recursive: true });
 fs.copyFileSync(path.join(MOD, 'index.html'), path.join(SITE, 'index.html'));
-fs.writeFileSync(path.join(SITE, 'data', 'db.js'), [DBJS ? fs.readFileSync(DBJS, 'utf8') : 'window.DB = ' + JSON.stringify(require('./du_lieu_mau.js').taoDB()) + ';',
-  ...THEM.map(f => fs.readFileSync(f, 'utf8'))].join('\n'));
+const GOI = arg('--goi') && path.resolve(arg('--goi')), DU_LIEU = arg('--du-lieu') && path.resolve(arg('--du-lieu'));
+let DATA;   // nội dung data/db.js của trang chạy thử: window.DB (+ window.DT / window.CTG, module tự gộp như trang web)
+if (GOI) {
+  if (!arg('--user')) { console.error('--goi cần --user <tên đăng nhập admin>'); process.exit(2); }
+  const k = require('../hoc/chung.js').docGoi(GOI, arg('--user'));
+  DATA = [['DB', k.db], ['DT', k.doithu], ['CTG', k.ctg]].filter(([, v]) => v).map(([b, v]) => `window.${b} = ${JSON.stringify(v)};`);
+} else if (DU_LIEU) DATA = ['db.js', 'doithu.js', 'ctg.js'].map(f => path.join(DU_LIEU, f)).filter(f => fs.existsSync(f)).map(f => fs.readFileSync(f, 'utf8'));
+else DATA = [DBJS ? fs.readFileSync(DBJS, 'utf8') : 'window.DB = ' + JSON.stringify(require('./du_lieu_mau.js').taoDB()) + ';'];
+fs.writeFileSync(path.join(SITE, 'data', 'db.js'), [...DATA, ...THEM.map(f => fs.readFileSync(f, 'utf8'))].join('\n'));
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css' };
 const srv = http.createServer((req, res) => {
@@ -91,7 +101,7 @@ const srv = http.createServer((req, res) => {
     extra: EXTRA.map(f => path.basename(f)) };
   fs.writeFileSync(path.join(OUT, 'ket_qua.json'), JSON.stringify(json, null, 1));
   execFileSync('python3', [path.join(__dirname, 'bao_cao_xlsx.py'), path.join(OUT, 'ket_qua.json'), path.join(OUT, 'KET_QUA.xlsx'),
-    DBJS ? '' : 'Giá lấy từ CSDL GIẢ LẬP của bộ chạy thử (~500 báo giá / 40 nhóm công việc) — chỉ minh họa cách module chạy, không phải giá thị trường thật.']);
+    DBJS || GOI || DU_LIEU ? '' : 'Giá lấy từ CSDL GIẢ LẬP của bộ chạy thử (~500 báo giá / 40 nhóm công việc) — chỉ minh họa cách module chạy, không phải giá thị trường thật.']);
   const nFill = rows.filter(r => r.dien).length, nKeep = rows.filter(r => !r.dien && (r.gia || r.gia_co_san)).length;
   console.log(MODE === 'col'
     ? `File: ${path.basename(BOQ)} — ${rows.length} dòng hạng mục · có giá đề xuất ${nFill} (cột riêng) · đã có giá QS ${rows.filter(r => r.gia_co_san).length} (giữ nguyên ở cột Đơn giá) · không đề xuất ${rows.length - nFill}`
@@ -100,5 +110,6 @@ const srv = http.createServer((req, res) => {
   console.log(`Thời gian: đọc ${(tRead / 1000).toFixed(1)} s · khớp ${(tMatch / 1000).toFixed(1)} s · điền + xuất ${(tExport / 1000).toFixed(1)} s`);
   console.log(fmt);
   if (errs.length) { console.error('LỖI TRANG:', errs); process.exitCode = 1; }
+  if (GOI) fs.rmSync(path.join(SITE, 'data'), { recursive: true, force: true });   // không để lại dữ liệu đã giải mã
   console.log(`Kết quả: ${OUT}`);
-})().catch(e => { console.error(e); srv.close(); process.exit(1); });
+})().catch(e => { console.error(e); srv.close(); if (GOI) fs.rmSync(path.join(SITE, 'data'), { recursive: true, force: true }); process.exit(1); });

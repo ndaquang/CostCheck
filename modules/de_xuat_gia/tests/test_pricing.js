@@ -167,6 +167,28 @@ t('học từ lựa chọn QS: nhớ đúng, gần đúng, nhóm bị bác', () 
   // tắt học
   assert.strictEqual(DXG.match(IX2, { desc: 'Bê tông móng M300', unit: 'm3' }, { learn: false })[0].g, top0.g);
 });
+t('nguồn có sẵn trong CSDL (cột ng của 2_XU_LY: Nội bộ + CTG): giữ nhãn, không gộp trùng, thêm đối thủ', () => {
+  const dst = makeDB(), dt = makeDB();
+  // khối db đã làm sạch chung Nội bộ + CTG: dòng lẻ là CTG, một dòng chưa ghi nguồn (-1 = Nội bộ)
+  dst.dicts.ng = ['Nội bộ', 'CTG'];
+  dst.cols.ng = dst.cols.name.map((_, i) => (i === 0 ? -1 : i % 2));
+  assert.ok(DXG.hasSource(dst, 'CTG')); assert.ok(!DXG.hasSource(dst, 'Đối thủ'));
+  const r = DXG.mergeDB(dst, dt, 'Đối thủ');
+  assert.strictEqual(r.dong, dt.count);
+  assert.deepStrictEqual(dst.dicts.ng, ['Nội bộ', 'CTG', 'Đối thủ']);
+  assert.ok(dst.cols.ng.every(v => v >= 0));
+  assert.strictEqual(dst.cols.ng[0], 0);
+  const n = l => dst.cols.ng.filter(v => dst.dicts.ng[v] === l).length;
+  assert.strictEqual(n('Đối thủ'), dt.count);
+  assert.strictEqual(n('CTG') + n('Nội bộ'), dst.count - dt.count);
+  assert.ok(DXG.hasSource(dst, 'Đối thủ'));
+  const IX = DXG.buildIndex(dst);
+  const gid = DXG.match(IX, { desc: 'Đào đất móng bằng máy', unit: 'm3' })[0].g;
+  assert.deepStrictEqual(Object.keys(DXG.groupStats(IX, gid, {}).src).sort(), ['CTG', 'Nội bộ', 'Đối thủ'].sort());
+  // CSDL chưa có cột nguồn: tagSource tạo cột, mọi dòng = Nội bộ
+  const x = makeDB(); DXG.tagSource(x, 'Bổ sung');
+  assert.deepStrictEqual(x.dicts.ng, ['Nội bộ', 'Bổ sung']); assert.ok(x.cols.ng.every(v => v === 0));
+});
 t('gộp nguồn giá: nhóm trùng tên gộp chung, nhóm mới thêm, lọc theo nguồn', () => {
   const dst = makeDB(), src = makeDB();
   // nguồn thứ hai: giá cao hơn 10%, thêm một nhóm chỉ nguồn này có, dự án riêng
@@ -182,7 +204,7 @@ t('gộp nguồn giá: nhóm trùng tên gộp chung, nhóm mới thêm, lọc t
   assert.strictEqual(dst.count, n0 + src.count);
   for (const a of Object.values(dst.cols)) assert.strictEqual(a.length, dst.count);
   assert.strictEqual(r.nhomMoi, 1); assert.strictEqual(r.nhomChung, 12);
-  assert.deepStrictEqual(dst.dicts.ns, ['Nội bộ', 'Đối thủ']);
+  assert.deepStrictEqual(dst.dicts.ng, ['Nội bộ', 'Đối thủ']);
   const IX2 = DXG.buildIndex(dst);
   assert.strictEqual(IX2.groups.length, nGroups0 + 1);
   const gid = DXG.match(IX2, { desc: 'Đào đất móng bằng máy', unit: 'm3' })[0].g;
@@ -191,7 +213,7 @@ t('gộp nguồn giá: nhóm trùng tên gộp chung, nhóm mới thêm, lọc t
   assert.strictEqual(own.n, 14); assert.deepStrictEqual(own.src, { 'Nội bộ': 14 });
   assert.ok(all.med > own.med);
   // dự án nguồn mới: lọc tỉnh vẫn đúng
-  assert.ok(DXG.groupStats(IX2, gid, { provs: new Set(['Tây Ninh']) }).ids.every(i => IX2.C.ns[i] === 1));
+  assert.ok(DXG.groupStats(IX2, gid, { provs: new Set(['Tây Ninh']) }).ids.every(i => IX2.C.ng[i] === 1));
   // nhóm chỉ có ở nguồn đã tắt: không nới bộ lọc sang nguồn đó
   const vrv = DXG.match(IX2, { desc: 'Hệ thống điều hòa VRV', unit: 'bộ' })[0];
   assert.strictEqual(IX2.groups[vrv.g].name, 'Hệ thống điều hòa VRV');

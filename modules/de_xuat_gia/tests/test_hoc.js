@@ -102,4 +102,52 @@ t('công cụ học / làm sạch gộp thêm nguồn giá (--them), như trang 
   assert.ok(fs.existsSync(path.join(ls, 'BAO_CAO_LAM_SACH.xlsx')));
   assert.throws(() => execFileSync('node', [path.join(HOC, 'lam_sach.js'), '--them', path.join(WORK, 'doithu.js'), '--sua', path.join(WORK, 'x.js')], { stdio: 'pipe' }));
 });
+t('đủ ba nguồn: --du-lieu (thư mục data) và --goi (gói .dgbw); CTG đã có trong khối db thì không gộp lần nữa', () => {
+  const { makeDoiThu, makeDB } = require('./fixture_db.js');
+  // khối db của 2_XU_LY: Nội bộ + CTG làm sạch chung (cột ng); thư mục data có thêm doithu.js và một ctg.js cũ
+  const nb = makeDB(); nb.dicts.ng = ['Nội bộ', 'CTG']; nb.cols.ng = nb.cols.name.map((_, i) => i % 3 === 2 ? 1 : 0);
+  const them = (i, patch) => { for (const k of Object.keys(nb.cols)) nb.cols[k].push(k in patch ? patch[k] : nb.cols[k][i]); nb.count++; };
+  them(2, {}); them(0, { name: 'Tổng cộng', p26: 5e8, cp: 5e8 });   // dòng CTG trùng hệt, dòng "Tổng cộng" Nội bộ
+  const dt = makeDoiThu(), dir = path.join(WORK, 'data');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'db.js'), 'window.DB = ' + JSON.stringify(nb) + ';\n');
+  fs.writeFileSync(path.join(dir, 'doithu.js'), 'window.DT = ' + JSON.stringify(dt) + ';\n');
+  fs.writeFileSync(path.join(dir, 'ctg.js'), 'window.CTG = ' + JSON.stringify(makeDB()) + ';\n');
+  const txt = node(path.join(HOC, 'hoc.js'), '--cap', path.join(WORK, 'CapKhop_mau.xlsx'), '--du-lieu', dir, '--out', path.join(WORK, 'hoc4'));
+  assert.ok(/Gộp nguồn Đối thủ \(doithu\.js\): 171 dòng/.test(txt) && /Nguồn CTG \(ctg\.js\): đã có trong CSDL/.test(txt), txt);
+  // làm sạch: cột Nguồn từng dòng lỗi, Tóm tắt đếm theo nguồn
+  const ls = path.join(WORK, 'ls4');
+  node(path.join(HOC, 'lam_sach.js'), '--du-lieu', dir, '--out', ls, '--nhanh');
+  const xl = execFileSync('python3', ['-c', `import sys,json
+from openpyxl import load_workbook
+w = load_workbook(sys.argv[1]); s = w['Tóm tắt']; hr = next(r for r in range(1, 10) if s.cell(r, 1).value == 'Loại lỗi')
+o = {'tt': [c.value for c in s[hr]], 'note': s.cell(2, 1).value, 'dem': {s.cell(r, 1).value: [s.cell(r, c).value for c in (3, 4, 5)] for r in range(hr + 1, s.max_row + 1)}}
+o['src'] = set()
+for n in w.worksheets[1:]:   # sheet lỗi theo dòng: cột Nguồn sau Dự án
+  h = next((r for r in range(1, 10) if n.cell(r, 1).value == 'Dòng CSDL'), None)
+  if h: o['nl'] = [c.value for c in n[h]]; o['src'] |= {n.cell(r, 3).value for r in range(h + 1, n.max_row + 1)}
+o['src'] = sorted(o['src'])
+print(json.dumps(o, ensure_ascii=False))`, path.join(ls, 'BAO_CAO_LAM_SACH.xlsx')]).toString();
+  const r = JSON.parse(xl);
+  assert.deepStrictEqual(r.tt.slice(0, 5), ['Loại lỗi', 'Số mục', 'Nội bộ', 'CTG', 'Đối thủ'], xl);
+  assert.ok(/\(Nội bộ \d+ · CTG \d+ · Đối thủ 171\)/.test(r.note), r.note);
+  assert.ok(r.dem && r.dem['Dòng trùng hệt'][1] === 1 && r.dem['Mô tả không rõ'][0] >= 1, xl);   // đếm theo nguồn: [Nội bộ, CTG, Đối thủ]
+  assert.deepStrictEqual(r.nl.slice(0, 3), ['Dòng CSDL', 'Dự án', 'Nguồn'], xl);
+  assert.ok(r.src.includes('Nội bộ') && r.src.includes('CTG') && r.src.every(x => ['Nội bộ', 'CTG', 'Đối thủ'].includes(x)), xl);
+  // --sua: chỉ khối db (Nội bộ + CTG), không trộn đối thủ vào bản sửa
+  const sua = node(path.join(HOC, 'lam_sach.js'), '--du-lieu', dir, '--out', path.join(WORK, 'ls5'), '--sua', path.join(WORK, 'db_sach4.js'), '--nhanh');
+  assert.ok(/--sua: chỉ soát và sửa CSDL chính, không gộp Đối thủ, CTG/.test(sua), sua);
+  const s4 = JSON.parse(fs.readFileSync(path.join(WORK, 'db_sach4.js'), 'utf8').replace(/^window\.DB = /, '').replace(/;\s*$/, ''));
+  assert.deepStrictEqual(s4.dicts.ng, ['Nội bộ', 'CTG']); assert.ok(s4.count <= nb.count);
+  // --goi: đọc thẳng gói admin (khối db + doithu), mật khẩu qua DGW_MAT_KHAU
+  const goi = path.join(WORK, 'admin.dgbw');
+  execFileSync('node', ['-e', `require(${JSON.stringify(path.join(__dirname, '../../ctg/tests/mau.js'))}).goiMau({ db: [JSON.parse(process.argv[1]), 'admin'], doithu: [JSON.parse(process.argv[2]), 'admin'] }).then(g => require('fs').writeFileSync(process.argv[3], JSON.stringify(g)))`,
+    JSON.stringify(nb), JSON.stringify(dt), goi]);
+  const env = { ...process.env, DGW_MAT_KHAU: 'matkhau' };
+  const g = execFileSync('node', [path.join(HOC, 'hoc.js'), '--cap', path.join(WORK, 'CapKhop_mau.xlsx'), '--goi', goi, '--user', 'admin', '--out', path.join(WORK, 'hoc5')], { env }).toString();
+  assert.ok(/Gộp nguồn Đối thủ \(admin\.dgbw \(khối doithu\)\): 171 dòng/.test(g), g);
+  const r5 = JSON.parse(fs.readFileSync(path.join(WORK, 'hoc4', 'hoc.json'), 'utf8')), r6 = JSON.parse(fs.readFileSync(path.join(WORK, 'hoc5', 'hoc.json'), 'utf8'));
+  assert.deepStrictEqual(r6.truoc, r5.truoc);   // cùng dữ liệu với --du-lieu → cùng kết quả khớp
+  assert.throws(() => execFileSync('node', [path.join(HOC, 'hoc.js'), '--goi', goi, '--user', 'admin', '--out', path.join(WORK, 'hoc6')], { env: { ...env, DGW_MAT_KHAU: 'sai' }, stdio: 'pipe' }), /Sai mật khẩu/);
+});
 console.log(`\n${n} nhóm kiểm thử công cụ học đạt.`);

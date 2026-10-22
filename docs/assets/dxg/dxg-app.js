@@ -40,7 +40,7 @@
     wb: null, fileName: '', sheets: [], lines: [], items: [],
     baseList: null, baseName: '', extra: [], session: null,
     learn: { cap: [], dong_nghia: [] }, learnInfo: null,   // dữ liệu học (.dxgl) đã nạp
-    sources: [],   // nguồn giá ngoài CSDL nội bộ đã thử nạp: [{ label, status: 'ok' | 'none' | 'format', dong, nhomChung, nhomMoi }]
+    sources: [],   // nguồn giá ngoài CSDL nội bộ đã thử nạp: [{ label, status: 'ok' | 'co_san' (đã có trong CSDL) | 'none' | 'loi' | 'format', dong, nhomChung, nhomMoi }]
     // mode: 'col' = ghi giá đề xuất vào CỘT RIÊNG tô màu (mặc định, không đụng cột Đơn giá); 'rate' = điền vào ô Đơn giá đang trống
     opt: { mode: 'col', pick: 'p25', minFit: 'tb', round: 'auto', overwrite: false, amount: true, yearFrom: null, yearTo: null, types: new Set(), provs: new Set(),
       excludeReview: true, excludeOutlier: true, excludeWarn: false, srcOff: new Set(), pool: true, factor: 1, tolBl: 0.10, tolOk: 0.05, tolBt: 0.15 },
@@ -109,8 +109,8 @@
   /* ---------- Nguồn giá ngoài CSDL nội bộ ---------- */
   // Các khối dữ liệu cùng định dạng window.DB trong gói .dgbw, gộp vào CSDL của module để có thêm báo giá cho mỗi nhóm
   // công việc. Chỉ admin; nhân viên không có khóa mở các khối này. Chạy thử không qua đăng nhập: dùng window.DT / window.CTG
-  // nếu trang đã nạp sẵn (vd data/db.js gán thêm biến window.DT).
-  const NGUON = [{ kind: 'doithu', label: 'Đối thủ', glob: 'DT' }, { kind: 'ctg', label: 'CTG', glob: 'CTG' }];
+  // nếu trang đã nạp sẵn (vd data/db.js gán thêm biến window.DT). Nguồn đã có trong CSDL (cột ng) thì không gộp lần nữa.
+  const NGUON = [{ kind: 'ctg', label: 'CTG', glob: 'CTG' }, { kind: 'doithu', label: 'Đối thủ', glob: 'DT' }];
   async function readSource(n) {
     if (window.SECURE) return JSON.parse(await window.SECURE.load(n.kind));
     if (!window[n.glob]) throw new Error('không có');
@@ -119,6 +119,8 @@
   async function loadSources() {
     if (!ADMIN) return;
     for (const n of NGUON) {
+      // nguồn đã có trong CSDL (CTG làm sạch chung trong khối db, hoặc app tra cứu đã gộp đối thủ) thì không gộp lần nữa
+      if (DXG.hasSource(DBX || window.DB, n.label)) { S.sources.push({ label: n.label, status: 'co_san' }); continue; }
       let src;
       try { src = await readSource(n); }
       catch (e) { S.sources.push({ label: n.label, status: !window.SECURE || e.code === 'THIEU_KHOI' ? 'none' : 'loi', why: String(e && e.message || e) }); continue; }
@@ -135,9 +137,9 @@
   function showMeta() {
     const meta = $('#dxg-meta'), srcEl = $('#dxg-src');
     const C = DBX.cols, D = DBX.dicts || {}, cnt = {};
-    if (Array.isArray(C.ns)) for (let i = 0; i < DBX.count; i++) { const l = D.ns[C.ns[i]]; cnt[l] = (cnt[l] || 0) + 1; }
+    if (Array.isArray(C.ng) && Array.isArray(D.ng)) for (let i = 0; i < DBX.count; i++) { const l = D.ng[C.ng[i]] || 'Nội bộ'; cnt[l] = (cnt[l] || 0) + 1; }
     const parts = Object.entries(cnt).map(([l, n]) => `${l} ${NF.format(n)}`);
-    const miss = S.sources.filter(x => x.status !== 'ok').map(x => `${x.label}: ${x.status === 'none' ? 'không có trong gói dữ liệu' : x.status === 'loi' ? 'không mở được (' + x.why + ')' : 'định dạng khác, chưa dùng được'}`);
+    const miss = S.sources.filter(x => x.status !== 'ok' && x.status !== 'co_san').map(x => `${x.label}: ${x.status === 'none' ? 'không có trong gói dữ liệu' : x.status === 'loi' ? 'không mở được (' + x.why + ')' : 'định dạng khác, chưa dùng được'}`);
     // nguồn chưa quy giá về năm gốc (CTG): đã quy đổi theo hệ số năm học từ CSDL nội bộ
     const quy = S.sources.filter(x => x.quyDoi || x.khongNam).map(x => `${x.label}: quy giá về ${DBX.baseYear || 2026} theo hệ số năm của CSDL nội bộ (${NF.format(x.quyDoi)} dòng${x.khongNam ? `; ${NF.format(x.khongNam)} dòng không rõ năm giữ giá gốc` : ''})`);
     const gop = S.sources.filter(x => x.status === 'ok').map(x => `${x.label}: ${NF.format(x.nhomChung)} nhóm trùng tên với CSDL, ${NF.format(x.nhomMoi)} nhóm mới`);
@@ -148,11 +150,11 @@
       + (gop.length ? ` · ${gop.join(' · ')}` : '') + (quy.length ? ` · ${quy.join(' · ')}` : '')
       + (lech.length ? ` · Lưu ý: ${lech.join(', ')} quy giá về năm gốc khác CSDL nội bộ` : '');
   }
-  const nhieuNguon = () => !!(DBX && DBX.dicts && DBX.dicts.ns && DBX.dicts.ns.length > 1 && Array.isArray(DBX.cols.ns));
+  const nhieuNguon = () => !!(DBX && DBX.dicts && DBX.dicts.ng && DBX.dicts.ng.length > 1 && Array.isArray(DBX.cols.ng));
   // Nguồn có báo giá trong phân bố: số báo giá theo nguồn của một thống kê nhóm (chỉ hiện khi CSDL có từ 2 nguồn)
   const srcTxt = st => {
     const D = DBX.dicts || {};
-    if (!st || !st.src || !D.ns || D.ns.length < 2) return '';
+    if (!st || !st.src || !D.ng || D.ng.length < 2) return '';
     return ' (' + Object.entries(st.src).map(([l, n]) => `${l} ${n}`).join(', ') + ')';
   };
   function rebuildIndex() {
@@ -197,7 +199,7 @@
   }
   // "Nguồn giá": mặc định dùng mọi nguồn; bỏ chọn nguồn nào thì báo giá của nguồn đó không vào phân bố giá
   function buildSourceOptions() {
-    const D = (DBX && DBX.dicts) || {}, labels = D.ns && D.ns.length ? D.ns : ['Nội bộ'], box = $('#o-src .msel-list');
+    const D = (DBX && DBX.dicts) || {}, labels = D.ng && D.ng.length ? D.ng : ['Nội bộ'], box = $('#o-src .msel-list');
     if (!box) return;
     box.innerHTML = labels.map(l => `<label><input type="checkbox" value="${esc(l)}"${S.opt.srcOff.has(l) ? '' : ' checked'}> ${esc(l)}</label>`).join('');
     const sum = () => { const on = labels.filter(l => !S.opt.srcOff.has(l)); $('#o-src summary').textContent = on.length === labels.length ? 'Tất cả' : on.join(', ') || '(không nguồn nào)'; };
@@ -320,13 +322,13 @@
     if (pi < 0) { DB.projects.push(['BOSUNG', 'Đơn giá bổ sung', '', '', '', '']); pi = DB.projects.length - 1; }
     const uIdx = (dict, v) => { if (!D[dict]) D[dict] = []; let k = D[dict].indexOf(v); if (k < 0) { D[dict].push(v); k = D[dict].length - 1; } return k; };
     const N = DB.count, year = DB.baseYear || new Date().getFullYear();
-    const ns = DXG.tagSource(DB, 'Bổ sung');
+    const ng = DXG.tagSource(DB, 'Bổ sung');
     const keys = Object.keys(C).filter(k => Array.isArray(C[k]));
     for (const it of list) {
       // mô tả ngắn ("Móng") trong file bổ sung: ghép tiêu đề gần nhất để thành tên đầy đủ
       const name = it.desc.length < 25 && it.ctx ? `${it.ctx} — ${it.desc}` : it.desc;
       const row = { name, spec: '', u: uIdx('u', it.unit), cu: uIdx('cu', it.unit), g: -1, gn: -1, p26: it.price, cp: it.price, tot: it.price, y: year, p: pi,
-        st: -1, ol: -1, warn: -1, mat: null, lab: null, mac: null, ns };
+        st: -1, ol: -1, warn: -1, mat: null, lab: null, mac: null, ng };
       for (const k of keys) C[k].push(k in row ? row[k] : (typeof C[k][0] === 'number' ? -1 : null));
       S.extra.push({ ...it, file: fileName });
     }
@@ -706,7 +708,7 @@
       const ids = [...c.st.ids].sort((a, b) => (IX.C.y[b] || 0) - (IX.C.y[a] || 0)).slice(0, 60);
       h += `<h4>Báo giá tham khảo (${c.st.n}${c.st.n > ids.length ? `, hiện ${ids.length} mới nhất` : ''})</h4>
         <div class="tbl-wrap"><table class="refs"><thead><tr><th>Năm</th>${ADMIN ? '<th>Dự án</th>' : ''}<th>Tỉnh/TP</th>${nhieuNguon() ? '<th>Nguồn</th>' : ''}<th>Tên trong báo giá</th><th class="num">Giá quy đổi</th><th class="num">Giá gốc</th></tr></thead><tbody>
-        ${ids.map(i => { const p = projOf(i); return `<tr><td>${IX.C.y[i] || ''}</td>${ADMIN ? `<td>${esc(p[1] || p[0] || '')}</td>` : ''}<td>${esc(p[4] || p[3] || '')}</td>${nhieuNguon() ? `<td>${esc(IX.D.ns[IX.C.ns[i]] || '')}</td>` : ''}<td>${esc(IX.C.name[i])}</td><td class="num">${fmt(IX.price(i) * (c.st.rate.get(i) ?? c.cand.ratio) * o.factor)}</td><td class="num small">${fmt(IX.C.tot[i])} /${esc(IX.unitOf(i))}</td></tr>`; }).join('')}
+        ${ids.map(i => { const p = projOf(i); return `<tr><td>${IX.C.y[i] || ''}</td>${ADMIN ? `<td>${esc(p[1] || p[0] || '')}</td>` : ''}<td>${esc(p[4] || p[3] || '')}</td>${nhieuNguon() ? `<td>${esc(IX.D.ng[IX.C.ng[i]] || '')}</td>` : ''}<td>${esc(IX.C.name[i])}</td><td class="num">${fmt(IX.price(i) * (c.st.rate.get(i) ?? c.cand.ratio) * o.factor)}</td><td class="num small">${fmt(IX.C.tot[i])} /${esc(IX.unitOf(i))}</td></tr>`; }).join('')}
         </tbody></table></div>`;
     }
     $('#dw-body').innerHTML = h;

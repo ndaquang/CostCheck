@@ -183,7 +183,7 @@ print(json.dumps([[ws.cell(r,4).value, ws.cell(r,5).value, ws.cell(r,7).value] f
   check(/Đối thủ 171/.test(meta) && new RegExp(`CTG ${CTGDB.count}`).test(meta), 'gộp nguồn đối thủ + CTG vào CSDL của module: ' + meta);
   const srcLine = await page.textContent('#dxg-src');
   check(/CTG: quy giá về 2026/.test(srcLine), 'CTG (giá chưa quy đổi năm) được quy về năm gốc: ' + srcLine);
-  check(JSON.stringify(await page.$$eval('#o-src input', a => a.map(i => i.value))) === '["Nội bộ","Đối thủ","CTG"]', 'tùy chọn "Nguồn giá" có Nội bộ / Đối thủ / CTG');
+  check(JSON.stringify(await page.$$eval('#o-src input', a => a.map(i => i.value))) === '["Nội bộ","CTG","Đối thủ"]', 'tùy chọn "Nguồn giá" có Nội bộ / CTG / Đối thủ');
   await run(path.join(WORK, 'BOQ_mau.xlsx'));
   s = await state();
   check(by('Xay dung|15').fill && by('Xay dung|15').price >= 3.1e8, 'VRV (chỉ nguồn đối thủ có) giờ có giá đề xuất: ' + by('Xay dung|15').price);

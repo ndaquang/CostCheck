@@ -20,19 +20,33 @@ function norm(s) {
 let DB, C, D, N;
 // Chạy trong phần mềm Windows: dữ liệu nạp qua kênh bảo mật (window.SECURE), quyền admin / nhan_vien
 const ROLE = (window.SECURE && window.SECURE.role) || 'admin';
-// Bộ dữ liệu: 'noibo' (mặc định), 'ctg' (chiết tính giá — tách vật tư / nhân công) hoặc 'doithu' (đơn giá đối thủ).
-// CTG và đối thủ là dữ liệu độc lập, chỉ admin, chỉ tra cứu. RIENG = thông tin bộ riêng đang mở (null với dữ liệu nội bộ).
-// Chuyển bộ dữ liệu ngay trong trang (switchDS), không tải lại trang để giữ phiên đăng nhập.
+// Bộ dữ liệu: 'noibo' (mặc định) hoặc 'doithu' (đơn giá đối thủ — chỉ admin, chỉ tra cứu). RIENG = bộ riêng đang mở
+// (null với dữ liệu nội bộ). Chuyển bộ dữ liệu ngay trong trang (switchDS), không tải lại trang để giữ phiên đăng nhập.
 const DS_RIENG = {
-  ctg: { khoi: 'ctg', file: 'data/ctg.js', bien: 'CTG', title: 'CSDL chiết tính giá', ph: 'Tìm đơn giá chiết tính… vd: be tong lot, cot thep, xay tuong', vtnc: true,
-    tao: '<code>node modules/ctg/dong_goi.js --xlsx DATABASE_CTG.xlsx --js WEB/data/ctg.js</code>',
-    thieu: 'Gói dữ liệu này chưa có CSDL chiết tính giá. Admin chạy: node modules/ctg/dong_goi.js --xlsx DATABASE_CTG.xlsx --goi <gói admin .dgbw> --user <admin>' },
   doithu: { khoi: 'doithu', file: 'data/doithu.js', bien: 'DT', title: 'Đơn giá đối thủ', ph: 'Tìm đơn giá đối thủ… vd: be tong lot, cot thep cot',
-    tao: '<code>python build_data.py</code> trong thư mục WEB' },
+    tao: '<code>python build_data.py --nguon doithu</code> trong thư mục 2_XU_LY (hoặc CAP_NHAT_DU_LIEU.bat)' },
 };
-let DS = (q => (q === 'ctg' || q === 'doithu' ? q : 'noibo'))(new URLSearchParams(location.search).get('ds'));
+// Dữ liệu nội bộ có nhiều NGUỒN, phân biệt bằng cột C.ng "Nguồn dữ liệu":
+// • Nội bộ + CTG: khối 'db' (2_XU_LY làm sạch chung một quy trình; gói nhân viên đã lọc bỏ dòng CTG).
+// • Nguồn phụ (chỉ admin): đơn giá đối thủ (khối 'doithu') và CTG đóng gói riêng (khối 'ctg' của modules/ctg/dong_goi.js,
+//   chỉ dùng khi khối db chưa có CTG) được gộp thêm khi nạp — pricing.js mergeDB: nhóm trùng tên + đơn vị thì chung nhóm,
+//   giá chưa quy đổi thì quy về năm gốc — để Điểm rơi giá, Phân tích (So sánh nguồn) và Điền giá BOQ dùng cả ba nguồn.
+//   Nguồn có anTraCuu: Tra cứu mặc định không hiện (bỏ chọn sẵn trong bộ lọc "Nguồn dữ liệu"), như trước khi gộp.
+const NGUON_PHU = [
+  { label: 'CTG', khoi: 'ctg', file: 'data/ctg.js', bien: 'CTG' },
+  { label: 'Đối thủ', khoi: 'doithu', file: 'data/doithu.js', bien: 'DT', anTraCuu: true },
+];
+const NGUON_THU_TU = ['Nội bộ', 'CTG', 'Đối thủ'];   // thứ tự hiện các nguồn
+const SRC_COLOR = { 'Nội bộ': 'var(--series-1)', 'CTG': 'var(--series-2)', 'Đối thủ': 'var(--series-3)' };
+const srcOf = i => C.ng && C.ng[i] >= 0 ? D.ng[C.ng[i]] : 'Nội bộ';
+const srcTag = i => { const s = srcOf(i); return s !== 'Nội bộ' ? `<span class="tag src${s === 'Đối thủ' ? ' src-dt' : ''}" title="Nguồn dữ liệu: ${esc(s)}">${esc(s)}</span>` : ''; };
+const DS_URL = new URLSearchParams(location.search).get('ds');
+let DS = DS_URL === 'doithu' ? 'doithu' : 'noibo';
+// địa chỉ cũ ?ds=ctg (trước đây CTG là mục riêng): mở dữ liệu nội bộ, lọc sẵn nguồn CTG
+if (DS_URL === 'ctg') try { history.replaceState(null, '', location.pathname + (location.hash.length > 1 ? location.hash + '&' : '#') + 'f.ng=CTG'); } catch (e) { }
 let RIENG = DS_RIENG[DS] || null;
 if (RIENG && ROLE !== 'admin') location.replace('index.html');
+let PHU = [];   // nguồn phụ đã thử gộp: [{ label, status: 'ok' | 'co_san' | 'none' | 'loi' | 'format', dong, nhomChung, nhomMoi, quyDoi }]
 let nameNorm, docNorm;          // chuỗi đã chuẩn hóa theo dòng
 let vocab, postings;            // chỉ mục đảo: từ -> Int32Array(dòng*4 + trường)
 let parVocab, parPost, parRows; // chỉ mục "Hạng mục cha"
@@ -42,17 +56,42 @@ const state = { q: '', sort: 'rel', pmin: null, pmax: null, par: false, split: f
 let result = { ids: new Int32Array(0), score: null, matched: new Set(), partial: false, groups: null };
 
 /* ---------- Nạp dữ liệu ---------- */
-// Một bộ dữ liệu → Promise(DB): qua window.SECURE (gói .dgbw), hoặc data/*.js khi chạy thử không qua cổng đăng nhập
+// Một khối dữ liệu → Promise(DB): qua window.SECURE (gói .dgbw), hoặc data/*.js khi chạy thử không qua cổng đăng nhập.
+// Khối đã mở được giữ lại (RAW): mục Đối thủ dùng lại khối đã gộp vào dữ liệu nội bộ, không giải mã lần nữa.
+const RAW = {};
+function loadBlock(khoi, file, bien) {
+  if (RAW[khoi]) return Promise.resolve(RAW[khoi]);
+  return (window.SECURE ? window.SECURE.load(khoi).then(txt => JSON.parse(txt)) : new Promise((ok, fail) => {
+    if (window[bien] && window[bien].cols) return ok(window[bien]);
+    const s = document.createElement('script');
+    s.src = file;
+    s.onload = () => ok(window[bien]);
+    s.onerror = () => fail(Object.assign(new Error('Không tìm thấy ' + file), { code: 'THIEU_FILE' }));
+    document.body.appendChild(s);
+  })).then(db => (RAW[khoi] = db));
+}
 function loadData(ds) {
   const R = DS_RIENG[ds];
-  if (window.SECURE) return window.SECURE.load(R ? R.khoi : 'db').then(txt => JSON.parse(txt));
-  return new Promise((ok, fail) => {
-    const s = document.createElement('script');
-    s.src = R ? R.file : 'data/db.js';
-    s.onload = () => ok(R ? window[R.bien] : window.DB);
-    s.onerror = () => fail(Object.assign(new Error('Không tìm thấy ' + (R ? R.file : 'data/db.js')), { code: 'THIEU_FILE' }));
-    document.body.appendChild(s);
-  });
+  return R ? loadBlock(R.khoi, R.file, R.bien) : loadBlock('db', 'data/db.js', 'DB').then(gopNguonPhu);
+}
+// Gộp nguồn phụ vào dữ liệu nội bộ (chỉ admin; cần pricing.js của module Điền giá BOQ, nạp trước app.js).
+// Khối không có trong gói / không có file data/*.js thì bỏ qua; nguồn đã có trong khối db (vd CTG) thì không gộp lần nữa.
+async function gopNguonPhu(db) {
+  const X = window.DXG;
+  if (db.nguonPhu) { PHU = db.nguonPhu; return db; }
+  if (ROLE !== 'admin' || !X || !X.mergeDB) return db;
+  db.nguonPhu = PHU = [];
+  if (Array.isArray(db.cols.ng)) X.tagSource(db, 'Nội bộ');   // dòng chưa ghi nguồn = Nội bộ
+  for (const n of NGUON_PHU) {
+    if (X.hasSource(db, n.label)) { PHU.push({ label: n.label, status: 'co_san' }); continue; }
+    let src;
+    try { src = await loadBlock(n.khoi, n.file, n.bien); }
+    catch (e) { PHU.push({ label: n.label, status: e && (e.code === 'THIEU_KHOI' || e.code === 'THIEU_FILE') ? 'none' : 'loi', why: String(e && e.message || e) }); continue; }
+    if (!src || !src.cols || !Array.isArray(src.cols.name) || !src.count) { PHU.push({ label: n.label, status: 'format' }); continue; }
+    PHU.push({ label: n.label, status: 'ok', ...X.mergeDB(db, src, n.label) });
+  }
+  console.info('Nguồn dữ liệu:', PHU.map(x => `${x.label} ${x.status}${x.dong ? ` (${x.dong} dòng)` : ''}`).join(', '));
+  return db;
 }
 const loiMo = (e, ds) => (e && e.code === 'THIEU_KHOI' && DS_RIENG[ds] && DS_RIENG[ds].thieu) || String(e && e.message || e);
 function boot() {
@@ -61,7 +100,7 @@ function boot() {
     .catch(e => {
       if (e && e.code === 'THIEU_FILE') {
         $('#splash-msg').textContent = e.message;
-        $('#splash-err').innerHTML = `Hãy chạy ${RIENG ? RIENG.tao : '<code>python build_data.py</code> trong thư mục WEB'} rồi mở lại trang.`;
+        $('#splash-err').innerHTML = `Hãy chạy ${RIENG ? RIENG.tao : '<code>2_XU_LY\\CAP_NHAT_DU_LIEU.bat</code> (hoặc <code>python build_data.py</code> trong thư mục 2_XU_LY)'} rồi mở lại trang.`;
       } else { $('#splash-msg').textContent = 'Không mở được dữ liệu'; $('#splash-err').textContent = loiMo(e, DS); }
       $('.bar').hidden = true;
     });
@@ -72,6 +111,7 @@ function init(db) {
   setupNav();
   useDB(db);
   const sec = readHash();
+  if (!new URLSearchParams(location.hash.slice(1)).has('f.ng')) anNguonTraCuu();
   bindUI();
   run();
   $('#splash').remove();
@@ -80,12 +120,20 @@ function init(db) {
 }
 // Bật một bộ dữ liệu: chỉ mục tìm kiếm, bộ lọc, nhóm đại diện, giao diện của bộ đó
 function useDB(db) {
-  if (DS === 'noibo') window.DB = db;   // module Điền giá BOQ luôn dùng dữ liệu nội bộ qua window.DB
+  if (DS === 'noibo') window.DB = db;   // Điền giá BOQ, Phân tích (So sánh nguồn) dùng dữ liệu nội bộ đã gộp nguồn qua window.DB
   DB = db; C = DB.cols; D = DB.dicts; N = DB.count;
   buildIndex();
   buildFacets();
   buildGroupIndex();
   applyDS();
+}
+// Tra cứu mặc định không hiện nguồn có anTraCuu (đối thủ): chọn sẵn các nguồn còn lại trong bộ lọc "Nguồn dữ liệu".
+// Bỏ chip lọc là hiện cả đối thủ; địa chỉ trang có f.ng thì theo địa chỉ.
+function anNguonTraCuu() {
+  const f = FACETS.find(x => x.key === 'ng');
+  if (!f) return;
+  const an = NGUON_PHU.filter(n => n.anTraCuu).map(n => f.labels.indexOf(n.label)).filter(k => k >= 0 && f.total[k] > 0);
+  if (an.length) f.labels.forEach((l, k) => { if (f.total[k] > 0 && !an.includes(k)) f.sel.add(k); });
 }
 
 function buildIndex() {
@@ -267,6 +315,21 @@ function buildFacets() {
   if (C.st) FACETS.splice(0, 0, { key: 'st', label: 'Trạng thái làm sạch', open: true, ...fromDict(C.st, D.st) });
   if (C.ol) FACETS.splice(FACETS.findIndex(f => f.key === 'warn') + 1, 0, { key: 'ol', label: 'Phân loại ngoại lai', labels: [...D.ol, '(Không)'], code: i => C.ol[i] < 0 ? D.ol.length : C.ol[i] });
   if (C.vt) FACETS.splice(FACETS.findIndex(f => f.key === 'u') + 1, 0, { key: 'vt', label: 'Vật tư chuẩn hóa (thép)', search: true, ...fromDict(C.vt, D.vt) });
+  if (C.lk) {   // CTG: nhóm mã công tác 'MC.CON-B30' → 'MC.CON'
+    const labels = [], idx = new Map(), codes = new Int32Array(N);
+    for (let i = 0; i < N; i++) {
+      const v = C.lk[i] ? C.lk[i].split('-')[0].trim().toUpperCase() : UNK;
+      if (!idx.has(v)) { idx.set(v, labels.length); labels.push(v); }
+      codes[i] = idx.get(v);
+    }
+    FACETS.splice(FACETS.findIndex(f => f.key === 'w') + 1, 0, { key: 'lkg', label: 'Nhóm mã công tác (CTG)', search: true, labels, code: i => codes[i] });
+  }
+  if (C.src) {   // NRM2 gán tự động khi làm sạch → lọc theo cách phân loại để rà soát
+    const L = ['Theo CSDL gốc', 'Khớp tên đã phân loại', 'Tự động kNN', 'Theo mã công tác', UNK];
+    const m = D.src.map(s => { const k = L.findIndex(l => s.startsWith(l)); return k < 0 ? 4 : k; });
+    FACETS.push({ key: 'src', label: 'Nguồn phân loại NRM2', labels: L, code: i => C.src[i] < 0 ? 4 : m[C.src[i]] });
+  }
+  if (C.ng) FACETS.splice(0, 0, { key: 'ng', label: 'Nguồn dữ liệu', open: true, ...fromDict(C.ng, D.ng) });
   for (const f of FACETS) {
     const arr = new Int32Array(N);
     for (let i = 0; i < N; i++) arr[i] = f.code(i);
@@ -306,7 +369,7 @@ function applyFilters(base) {
 
 /* ---------- Nhóm đại diện ---------- */
 const GROUP_BATCH = 40, DETAIL_BATCH = 30;
-let G_ROWS = null, G_NAME = null, G_UNIT = null;   // theo mã nhóm (chỉ số từ điển D.g)
+let G_ROWS = null, G_NAME = null, G_UNIT = null, G_SRC = null;   // theo mã nhóm (chỉ số từ điển D.g); G_SRC: các nguồn có báo giá
 function buildGroupIndex() {
   const ng = D.g ? D.g.length : 0;
   const cnt = new Int32Array(ng);
@@ -319,7 +382,9 @@ function buildGroupIndex() {
     G_ROWS[g][cnt[g]++] = i;
     if (G_NAME[g] === undefined) { G_NAME[g] = C.gn[i] >= 0 ? D.gn[C.gn[i]] : C.name[i]; G_UNIT[g] = C.cu[i] >= 0 ? D.cu[C.cu[i]] : unitOf(i); }
   }
+  G_SRC = Array.from(G_ROWS, r => { const s = new Set(); if (C.ng) for (const i of r) s.add(srcOf(i)); return [...s].sort(thuTu); });
 }
+const thuTu = (a, b) => ((NGUON_THU_TU.indexOf(a) + 1) || 99) - ((NGUON_THU_TU.indexOf(b) + 1) || 99);   // Nội bộ, CTG, Đối thủ, nguồn khác
 const p26 = i => (C.p26 && C.p26[i] !== null && C.p26[i] !== undefined) ? C.p26[i] : (C.cp ? C.cp[i] : C.tot[i]);
 function qtile(sorted, p) { if (!sorted.length) return null; const x = (sorted.length - 1) * p, lo = Math.floor(x), hi = Math.ceil(x); return sorted[lo] + (sorted[hi] - sorted[lo]) * (x - lo); }
 function groupStats(ids) {
@@ -450,15 +515,25 @@ function toggleGroup(el) {
   body.hidden = !open; el.classList.toggle('open', open);
   if (open && !body.dataset.ready) { body.dataset.ready = 1; body.innerHTML = groupBody(e); e.detailShown = 0; appendDetails(el, e); }
 }
-const vtNc = () => !!(RIENG && RIENG.vtnc);   // CSDL chiết tính giá: hiện thêm vật tư / nhân công
+// Nhóm có tách vật tư / nhân công (vd CTG: Vật tư + Nhân công = Tổng cộng) ở ít nhất nửa số dòng: hiện thêm từng phần
+const vtNc = e => e.ids.filter(i => (C.mat[i] !== null && C.mat[i] !== undefined) || (C.lab[i] !== null && C.lab[i] !== undefined)).length * 2 >= e.ids.length;
 function medianOf(col, ids) { const v = ids.map(i => col[i]).filter(x => x !== null && x !== undefined).sort((a, b) => a - b); return v.length ? qtile(v, .5) : null; }
+function bySource(ids) {   // Map nguồn → các dòng, theo thứ tự Nội bộ, CTG, Đối thủ
+  const m = new Map(NGUON_THU_TU.map(l => [l, []]));
+  for (const i of ids) { const s = srcOf(i); if (!m.has(s)) m.set(s, []); m.get(s).push(i); }
+  for (const [k, v] of m) if (!v.length) m.delete(k);
+  return m;
+}
 function groupBody(e) {
   const s = e.st;
   const chip = (k, v) => `<span class="gs"><i>${k}</i> ${v}</span>`;
-  return `<div class="gsum">${chip('Đại diện', `<b>${money(s.med)}</b>`)}${vtNc() ? chip('Vật tư', money(medianOf(C.mat, e.ids))) + chip('Nhân công', money(medianOf(C.lab, e.ids))) : ''}${chip('Trung bình', money(s.mean))}${chip('Phổ biến', `${money(s.p25)} – ${money(s.p75)}`)}${chip('Thấp – cao', `${money(s.min)} – ${money(s.max)}`)}${chip('Báo giá', NF.format(s.n))}${chip('Dự án', s.proj)}${chip('Mới nhất', s.latest)}${s.variants > 1 ? chip('Tên biến thể', s.variants) : ''}
+  const bs = bySource(e.ids);
+  const cmp = bs.size > 1 ? [...bs].map(([k, ids]) => { const t = groupStats(ids); return chip(esc(k), `<b>${money(t.med)}</b> <span class="muted">(${t.n})</span>`); }).join('') : '';
+  e.vn = vtNc(e);
+  return `<div class="gsum">${chip('Đại diện', `<b>${money(s.med)}</b>`)}${cmp}${e.vn ? chip('Vật tư', money(medianOf(C.mat, e.ids))) + chip('Nhân công', money(medianOf(C.lab, e.ids))) : ''}${chip('Trung bình', money(s.mean))}${chip('Phổ biến', `${money(s.p25)} – ${money(s.p75)}`)}${chip('Thấp – cao', `${money(s.min)} – ${money(s.max)}`)}${chip('Báo giá', NF.format(s.n))}${chip('Dự án', s.proj)}${chip('Mới nhất', s.latest)}${s.variants > 1 ? chip('Tên biến thể', s.variants) : ''}
     ${e.g >= 0 ? `<button class="link" data-drop="${e.g}">Xem điểm rơi giá →</button>` : ''}</div>
-    <div class="small muted" style="margin:4px 0 6px">${C.p26 || C.cp ? `Giá quy về mặt bằng ${DB.baseYear || 2026}` : 'Giá gốc theo từng báo giá (chưa quy đổi theo năm)'}${vtNc() ? ', vật tư / nhân công là trung vị riêng từng phần' : ''}; tính trên các dòng đang lọc. Bấm 1 dòng để xem đủ thông tin.</div>
-    <div class="tbl-wrap"><table class="dtl"><thead><tr><th class="num">Năm</th><th>Dự án</th><th>Tên công việc (gốc trong BOQ)</th>${vtNc() ? '<th class="num">Vật tư</th><th class="num">Nhân công</th>' : ''}<th class="num">Đơn giá gốc</th></tr></thead><tbody></tbody></table></div>
+    <div class="small muted" style="margin:4px 0 6px">${C.p26 || C.cp ? `Giá quy về mặt bằng ${DB.baseYear || 2026}` : 'Giá gốc theo từng báo giá (chưa quy đổi theo năm)'}${e.vn ? ', vật tư / nhân công là trung vị riêng từng phần' : ''}; tính trên các dòng đang lọc. Bấm 1 dòng để xem đủ thông tin.</div>
+    <div class="tbl-wrap"><table class="dtl"><thead><tr><th class="num">Năm</th><th>Dự án</th><th>Tên công việc (gốc trong BOQ)</th>${e.vn ? '<th class="num">Vật tư</th><th class="num">Nhân công</th>' : ''}<th class="num">Đơn giá gốc</th></tr></thead><tbody></tbody></table></div>
     <div class="dmore"></div>`;
 }
 function appendDetails(el, e) {
@@ -468,8 +543,8 @@ function appendDetails(el, e) {
     const p = projOf(i), loc = C.loc && C.loc[i] >= 0 ? D.loc[C.loc[i]] : '';
     if (ROLE === 'nhan_vien') p[1] = p[2] || '';   // không hiện mã/tên dự án cho nhân viên
     const adj = p26(i), base = C.cp ? C.cp[i] : C.tot[i];
-    return `<tr data-row="${i}"><td class="num">${C.y[i] || ''}</td><td>${esc(p[1] || '')}<div class="price-sub">${esc(p[4] || p[3] || '')}</div></td>
-      <td>${hl(C.name[i])}${loc ? `<div class="price-sub">@ ${esc(loc)}</div>` : ''}</td>${vtNc() ? `<td class="num">${fmt(C.mat[i])}</td><td class="num">${fmt(C.lab[i])}</td>` : ''}
+    return `<tr data-row="${i}"><td class="num">${C.y[i] || ''}</td><td>${esc(p[1] || '')} ${srcTag(i)}<div class="price-sub">${esc(p[4] || p[3] || '')}</div></td>
+      <td>${hl(C.name[i])}${loc ? `<div class="price-sub">@ ${esc(loc)}</div>` : ''}</td>${e.vn ? `<td class="num">${fmt(C.mat[i])}</td><td class="num">${fmt(C.lab[i])}</td>` : ''}
       <td class="num"><b>${fmt(C.tot[i])}</b> <span class="small muted">/${esc(unitOf(i))}</span> ${flags(i)}${Math.abs(adj - base) > 0.5 || unitOf(i) !== e.unit ? `<div class="price-sub">≈ ${money(adj)} /${esc(e.unit)} (${DB.baseYear || 2026})</div>` : ''}</td></tr>`;
   }).join(''));
   e.detailShown = to;
@@ -488,7 +563,7 @@ function renderChips() {
   $('#chips').innerHTML = chips.map(([t, v, k, l]) =>
     `<span class="chip">${k ? `<i>${esc(k)}:</i>` : ''}<span title="${esc(l)}">${esc(l)}</span><button data-chip="${t}" data-v="${esc(v)}" title="Bỏ lọc">✕</button></span>`).join('');
 }
-const PRIMARY = ['nrm', 'u', 'y', 'type', 'prov25'];
+const PRIMARY = ['ng', 'nrm', 'u', 'y', 'type', 'prov25'];
 function facetHtml(f, openState) {
   const open = f.key in openState ? openState[f.key] : (PRIMARY.includes(f.key) ? !!f.open : false) || f.sel.size > 0;
   let items = f.labels.map((l, v) => v).filter(v => f.counts[v] > 0 || f.sel.has(v));
@@ -541,24 +616,26 @@ function showRow(i) {
   const kv = [
     ['Đơn giá tổng hợp', `<b>${fmt(C.tot[i])}</b> ${esc(curOf(i))} / ${esc(unitOf(i))} ${flags(i)}`],
     ['Quy về ' + (DB.baseYear || 2026), C.p26 ? `${money(p26(i))} / ${esc(C.cu[i] >= 0 ? D.cu[C.cu[i]] : unitOf(i))}` : ''],
+    ['Nguồn dữ liệu', C.ng ? `<b>${esc(srcOf(i))}</b>` : ''],
     ['Nhóm đại diện', g >= 0 ? `${esc(G_NAME[g])} <button class="link" data-drop="${g}">điểm rơi →</button>` : ''],
     ['Vị trí', C.loc && C.loc[i] >= 0 ? esc(D.loc[C.loc[i]]) : ''],
     ...(C.st ? [['Trạng thái làm sạch', `<b>${esc(C.st[i] >= 0 ? D.st[C.st[i]] : '')}</b>`], ['Lý do REVIEW', esc(C.why[i])]] : []),
     ['Đơn giá vật liệu', fmt(C.mat[i])], ['Đơn giá nhân công', fmt(C.lab[i])], ['Đơn giá máy', fmt(C.mac[i])],
     ['Thông số kỹ thuật', esc(C.spec[i])], ['Tên công việc (gốc)', C.oname ? esc(C.oname[i]) : ''],
     ['Hạng mục cha', esc(C.par[i] >= 0 ? D.par[C.par[i]] : '')], ['Mã hiệu gốc', esc(C.code[i])],
+    ['Mã công tác', C.lk ? esc(C.lk[i]) : ''],
     ['NRM2', `${esc(nr[0])} · ${esc(nr[1])}${C.src && C.src[i] >= 0 && D.src[C.src[i]] !== 'Theo CSDL gốc' ? ` <span class="muted">(${esc(D.src[C.src[i]])})</span>` : ''}`],
     ['Loại công việc', esc(C.w[i] >= 0 ? D.w[C.w[i]] : '')], ['Vật tư chuẩn hóa', C.vt && C.vt[i] >= 0 ? esc(D.vt[C.vt[i]]) : ''],
-    ['Năm báo giá', C.y[i] || ''], ['Dự án', `${esc(p[1])} <span class="muted">(${esc(p[0])})</span>`],
+    ['Năm báo giá', C.y[i] || ''], ['Dự án', p[1] && p[1] !== p[0] ? `${esc(p[1])} <span class="muted">(${esc(p[0])})</span>` : esc(p[0])],
     ['Loại hình', esc(p[2])], ['Tỉnh/TP', esc([p[3], p[4] && p[4] !== p[3] ? '→ ' + p[4] + ' (2025)' : ''].filter(Boolean).join(' '))],
     ['Nhà thầu/NCC', esc(C.c[i] >= 0 ? D.c[C.c[i]] : '')], ['Kiểm tra KL×ĐG', esc(C.chk[i] >= 0 ? D.chk[C.chk[i]] : '')],
-    ['File nguồn', file ? `<a href="${esc(encodeURI(rel))}" target="_blank">${esc(file)}</a>` : ''],
+    ['File nguồn', file ? (rel ? `<a href="${esc(encodeURI(rel))}" target="_blank">${esc(file)}</a>` : esc(file)) : ''],
     ['Sheet / Dòng', esc([C.sh[i] >= 0 ? D.sh[C.sh[i]] : '', C.row[i]].filter(Boolean).join(' / dòng '))],
     ['Mã dòng', esc(C.id[i])],
   ].filter(([, v]) => v !== '' && v !== null && v !== undefined);
   openDrawer(esc(C.name[i]), `
     <div class="actions">
-      ${file ? `<button class="btn" data-act="copypath" data-path="${esc(absPath(rel))}">Sao chép đường dẫn file</button>` : ''}
+      ${file && rel ? `<button class="btn" data-act="copypath" data-path="${esc(absPath(rel))}">Sao chép đường dẫn file</button>` : ''}
       <button class="btn" data-act="copyrow" data-i="${i}">Sao chép dòng</button>
     </div>
     <dl class="kv">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>`);
@@ -569,7 +646,7 @@ function exportXlsx() {
   const gs = result.groups, base = DB.baseYear || 2026, quy = !!(C.p26 || C.cp);
   const sum = [['Tên nhóm đại diện', 'ĐV', quy ? `Đơn giá đại diện (${base})` : 'Đơn giá đại diện', 'P25', 'P75', 'Trung bình', 'Thấp nhất', 'Cao nhất', 'Số báo giá', 'Số dự án', 'Năm mới nhất', 'Số tên biến thể', 'Mã nhóm']];
   for (const e of gs) { const s = e.st; sum.push([e.name, e.unit, Math.round(s.med), Math.round(s.p25), Math.round(s.p75), Math.round(s.mean), Math.round(s.min), Math.round(s.max), s.n, s.proj, s.latest, s.variants, e.g >= 0 ? D.g[e.g] : '']); }
-  const det = [['Nhóm / Tên công việc', 'ĐV', quy ? `Đơn giá quy về ${base}` : 'Đơn giá', 'Đơn giá gốc', 'ĐV gốc', 'Năm', 'Dự án', 'Tỉnh/TP (2025)', 'Loại hình', 'Vị trí', 'Trạng thái', 'Đơn giá VL', 'Đơn giá NC', 'File nguồn', 'Mã dòng']];
+  const det = [['Nhóm / Tên công việc', 'ĐV', quy ? `Đơn giá quy về ${base}` : 'Đơn giá', 'Đơn giá gốc', 'ĐV gốc', 'Năm', 'Dự án', 'Tỉnh/TP (2025)', 'Loại hình', 'Vị trí', 'Trạng thái', 'Đơn giá VL', 'Đơn giá NC', 'File nguồn', 'Mã dòng', 'Nguồn dữ liệu']];
   const opts = [{}];
   let nrow = 0, cut = false;
   for (const e of gs) {
@@ -581,14 +658,14 @@ function exportXlsx() {
     for (const i of ids) {
       const p = projOf(i);
       det.push(['    ' + C.name[i], e.unit, Math.round(p26(i)), C.tot[i], unitOf(i), C.y[i], p[1], p[4], p[2], C.loc && C.loc[i] >= 0 ? D.loc[C.loc[i]] : '',
-        C.st && C.st[i] >= 0 ? D.st[C.st[i]] : '', C.mat[i], C.lab[i], C.f[i] >= 0 ? D.f[C.f[i]] : '', C.id[i]]);
+        C.st && C.st[i] >= 0 ? D.st[C.st[i]] : '', C.mat[i], C.lab[i], C.f[i] >= 0 ? D.f[C.f[i]] : '', C.id[i], srcOf(i)]);
       opts.push({ level: 1, hidden: 1 });
       nrow++;
     }
   }
   const blob = writeWorkbook([
     { name: 'TONG_HOP', rows: sum, widths: [60, 7, 16, 13, 13, 13, 13, 13, 9, 9, 10, 10, 11], nums: new Set([2, 3, 4, 5, 6, 7]) },
-    { name: 'CHI_TIET', rows: det, rowOpts: opts, widths: [70, 7, 16, 14, 7, 7, 24, 16, 18, 26, 10, 12, 12, 36, 14], nums: new Set([2, 3, 11, 12]) },
+    { name: 'CHI_TIET', rows: det, rowOpts: opts, widths: [70, 7, 16, 14, 7, 7, 24, 16, 18, 26, 10, 12, 12, 36, 14, 10], nums: new Set([2, 3, 11, 12]) },
   ]);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -599,30 +676,38 @@ function exportXlsx() {
 }
 
 /* ---------- Điểm rơi giá ---------- */
-const DROP = { g: null };
+const DROP = { g: null, src: '', both: false, tops: {} };
+const nhieuNguon = g => G_SRC[g] && G_SRC[g].length > 1;   // nhóm có giá ở ≥ 2 nguồn (Nội bộ, CTG, Đối thủ)
+// "· có CTG, Đối thủ" / "· chỉ Đối thủ" sau tên nhóm
+const tagNguon = g => {
+  const s = G_SRC[g] || [], k = s.filter(x => x !== 'Nội bộ');
+  return k.length ? ` · ${s.includes('Nội bộ') ? 'có' : 'chỉ'} ${k.join(', ')}` : '';
+};
 function dropTopGroups(q) {
+  const both = DROP.both && C.ng;
   if (q) {
     const s = search(q);
     if (!s.ids || !s.ids.length) return [];
-    return aggregate(s.ids, s.score, s.phrase).filter(e => e.g >= 0).sort((a, b) => b.score - a.score || b.st.proj - a.st.proj).slice(0, 12);
+    return aggregate(s.ids, s.score, s.phrase).filter(e => e.g >= 0 && (!both || nhieuNguon(e.g))).sort((a, b) => b.score - a.score || b.st.proj - a.st.proj).slice(0, 12);
   }
-  if (!DROP.top) {
+  const k = both ? 'both' : 'all';
+  if (!DROP.tops[k]) {
     const arr = [];
-    for (let g = 0; g < G_ROWS.length; g++) arr.push([g, new Set(Array.from(G_ROWS[g], i => C.p[i])).size]);
-    DROP.top = arr.sort((a, b) => b[1] - a[1]).slice(0, 24).map(([g, p]) => ({ g, name: G_NAME[g], unit: G_UNIT[g], proj: p }));
+    for (let g = 0; g < G_ROWS.length; g++) if (!both || nhieuNguon(g)) arr.push([g, new Set(Array.from(G_ROWS[g], i => C.p[i])).size]);
+    DROP.tops[k] = arr.sort((a, b) => b[1] - a[1]).slice(0, 24).map(([g, p]) => ({ g, name: G_NAME[g], unit: G_UNIT[g], proj: p }));
   }
-  return DROP.top;
+  return DROP.tops[k];
 }
 function renderDropPicker() {
   const q = $('#dp-q').value.trim();
   const list = dropTopGroups(q);
-  $('#dp-list').innerHTML = list.length ? list.map(e => `<button class="dp-item${e.g === DROP.g ? ' on' : ''}" data-g="${e.g}">${esc(e.name)} <span class="muted">· ${esc(e.unit)} · ${e.st ? e.st.proj : e.proj} DA</span></button>`).join('')
+  $('#dp-list').innerHTML = list.length ? list.map(e => `<button class="dp-item${e.g === DROP.g ? ' on' : ''}" data-g="${e.g}">${esc(e.name)} <span class="muted">· ${esc(e.unit)} · ${e.st ? e.st.proj : e.proj} DA${esc(tagNguon(e.g))}</span></button>`).join('')
     : '<span class="muted small">Không tìm thấy nhóm phù hợp</span>';
-  $('#dp-list-h').textContent = q ? 'Nhóm phù hợp' : 'Nhóm có nhiều dự án nhất';
+  $('#dp-list-h').textContent = (q ? 'Nhóm phù hợp' : 'Nhóm có nhiều dự án nhất') + (DROP.both && C.ng ? ' (có giá từ 2 nguồn trở lên)' : '');
 }
-function boxes(rows, unit) {   // biểu đồ hộp ngang dùng chung trục
+function boxes(rows, unit, W = 560) {   // biểu đồ hộp ngang dùng chung trục; r.color: màu hộp (theo nguồn)
   if (!rows.length) return '<div class="muted small">Chưa đủ dữ liệu (cần ≥ 3 báo giá mỗi nhóm)</div>';
-  const W = 560, rowH = 26, L = 170, R = 60, H = rows.length * rowH + 22;
+  const rowH = 26, L = 170, R = 60, H = rows.length * rowH + 22;
   const lo = Math.min(...rows.map(r => r.p10)), hi = Math.max(...rows.map(r => r.p90));
   const xS = v => L + (v - lo) / (hi - lo || 1) * (W - L - R);
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
@@ -631,7 +716,7 @@ function boxes(rows, unit) {   // biểu đồ hộp ngang dùng chung trục
     const y = k * rowH + 4, m = y + (rowH - 8) / 2;
     s += `<text x="${L - 8}" y="${m + 4}" text-anchor="end">${esc(r.k.length > 24 ? r.k.slice(0, 23) + '…' : r.k)}</text>`;
     s += `<line class="whisk" x1="${xS(r.p10)}" x2="${xS(r.p90)}" y1="${m}" y2="${m}"/>`;
-    s += `<rect class="box" x="${xS(r.p25)}" y="${y + 2}" width="${Math.max(3, xS(r.p75) - xS(r.p25))}" height="${rowH - 12}" rx="3"/>`;
+    s += `<rect class="box" x="${xS(r.p25)}" y="${y + 2}" width="${Math.max(3, xS(r.p75) - xS(r.p25))}" height="${rowH - 12}" rx="3"${r.color ? ` style="fill:${r.color}"` : ''}/>`;
     s += `<line class="medtick" x1="${xS(r.p50)}" x2="${xS(r.p50)}" y1="${y + 2}" y2="${y + rowH - 10}"/>`;
     s += `<text class="lbl" x="${xS(r.p90) + 6}" y="${m + 4}">${CH.short(r.p50)} <tspan class="muted">(${r.n})</tspan></text>`;
     s += `<rect class="hit" x="0" y="${y - 2}" width="${W}" height="${rowH}" data-tip="${esc(`${r.k}: trung vị ${money(r.p50)} · P25–P75 ${money(r.p25)}–${money(r.p75)} · ${r.n} báo giá`)}"/>`;
@@ -642,7 +727,18 @@ function renderDrop() {
   renderDropPicker();
   const box = $('#dp-view');
   if (DROP.g === null || !G_ROWS[DROP.g]) { box.innerHTML = '<div class="empty">Chọn một nhóm đại diện ở trên để xem điểm rơi đơn giá.</div>'; return; }
-  const g = DROP.g, ids = Array.from(G_ROWS[g]), s = groupStats(ids), unit = G_UNIT[g], base = DB.baseYear || 2026;
+  const g = DROP.g, all = Array.from(G_ROWS[g]), unit = G_UNIT[g], base = DB.baseYear || 2026;
+  const bs = bySource(all), multi = bs.size > 1;
+  if (DROP.src && !bs.has(DROP.src)) DROP.src = '';
+  const ids = DROP.src ? bs.get(DROP.src) : all, s = groupStats(ids);
+  const mixed = multi && !DROP.src;   // đang xem chung nhiều nguồn → tô màu theo nguồn
+  const dotColor = i => mixed ? (SRC_COLOR[srcOf(i)] || 'var(--series-4)') : 'var(--series-1)';
+  // 0) so sánh nguồn trên cùng nhóm (giá quy về năm gốc)
+  const srcRows = multi ? [...bs].map(([k, sid]) => { const a = Array.from(sid, p26).sort((p, q) => p - q);
+    return { k, n: a.length, p10: qtile(a, .1), p25: qtile(a, .25), p50: qtile(a, .5), p75: qtile(a, .75), p90: qtile(a, .9), proj: new Set(sid.map(i => C.p[i])).size }; }) : [];
+  const nbR = srcRows.find(r => r.k === 'Nội bộ');   // hệ số trung vị từng nguồn so với Nội bộ
+  const ratios = nbR && nbR.p50 ? srcRows.filter(r => r !== nbR && r.p50).map(r => ({ k: r.k, v: r.p50 / nbR.p50 })) : [];
+  const pctTxt = v => `${v >= 1 ? '+' : ''}${NF.format(Math.round((v - 1) * 1000) / 10)}%`;
   // 1) phân bố
   const vals = Float64Array.from(ids, p26).sort();
   const lo = qtile(vals, .02), hi = qtile(vals, .98), B = Math.min(24, Math.max(6, Math.ceil(Math.sqrt(vals.length)) + 2)), w = (hi - lo) / B || 1;
@@ -650,12 +746,17 @@ function renderDrop() {
   for (const v of vals) bins[Math.max(0, Math.min(B - 1, Math.floor((v - lo) / w)))]++;
   const hist = bins.map((c, k) => { const a = lo + k * w, b = a + w; const inBand = b > s.p25 && a < s.p75;
     return { k: CH.short(a), v: c, color: inBand ? 'var(--series-1)' : 'var(--muted)', tip: `${money(a)} – ${money(b)}: ${c} báo giá${inBand ? ' (vùng phổ biến)' : ''}` }; });
-  // 2) theo thời gian (giá gốc theo năm)
-  const byY = new Map();
-  for (const i of ids) { const y = C.y[i]; if (!y) continue; if (!byY.has(y)) byY.set(y, []); byY.get(y).push(C.cp ? C.cp[i] : C.tot[i]); }
-  const pts = ids.filter(i => C.y[i]).map(i => ({ x: C.y[i] + ((i * 7919) % 100 - 50) / 260, y: C.cp ? C.cp[i] : C.tot[i], r: 3.5, color: 'var(--series-1)',
-    tip: `${C.y[i]} · ${projOf(i)[1] || ''}: ${money(C.cp ? C.cp[i] : C.tot[i])} /${unit}` }));
-  const medLine = [...byY].sort((a, b) => a[0] - b[0]).map(([y, a]) => ({ x: y, y: qtile(a.sort((p, q) => p - q), .5) }));
+  // 2) theo thời gian (giá gốc theo năm); trung vị từng năm tách theo nguồn khi xem chung
+  const medLine = sid => {
+    const byY = new Map();
+    for (const i of sid) { const y = C.y[i]; if (!y) continue; if (!byY.has(y)) byY.set(y, []); byY.get(y).push(C.cp ? C.cp[i] : C.tot[i]); }
+    return [...byY].sort((a, b) => a[0] - b[0]).map(([y, a]) => ({ x: y, y: qtile(a.sort((p, q) => p - q), .5) }));
+  };
+  const pts = ids.filter(i => C.y[i]).map(i => ({ x: C.y[i] + ((i * 7919) % 100 - 50) / 260, y: C.cp ? C.cp[i] : C.tot[i], r: 3.5, color: dotColor(i),
+    tip: `${C.y[i]} · ${srcOf(i)} · ${projOf(i)[1] || ''}: ${money(C.cp ? C.cp[i] : C.tot[i])} /${unit}` }));
+  const lines = mixed ? [...bs].map(([k, sid]) => ({ pts: medLine(sid), color: SRC_COLOR[k] || 'var(--series-4)' })) : [{ pts: medLine(ids), color: 'var(--series-2)' }];
+  const noYear = ids.filter(i => !C.y[i]).length;
+  const legend = mixed ? `<div class="legend">${[...bs.keys()].map(k => `<span><i style="background:${SRC_COLOR[k] || 'var(--series-4)'}"></i>${esc(k)}</span>`).join('')}</div>` : '';
   // 3) theo tỉnh / loại hình
   const by = (fn) => {
     const m = new Map();
@@ -669,18 +770,23 @@ function renderDrop() {
   const vm = new Map();
   for (const i of ids) vm.set(C.name[i], (vm.get(C.name[i]) || 0) + 1);
   const variants = [...vm].sort((a, b) => b[1] - a[1]);
+  const srcSeg = multi ? `<div class="seg small-seg dp-src">${[['', 'Tất cả nguồn'], ...[...bs.keys()].map(k => [k, k])].map(([k, l]) =>
+    `<button data-dsrc="${esc(k)}" class="${DROP.src === k ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>` : '';
   box.innerHTML = `
-    <div class="dp-head"><div><div class="dp-name">${esc(G_NAME[g])}</div><div class="muted small">${esc(unit)} · ${NF.format(s.n)} báo giá · ${s.proj} dự án · ${variants.length} cách ghi tên · mới nhất ${s.latest}</div></div>
-      <div class="kpis dp-kpis">
+    <div class="dp-head"><div><div class="dp-name">${esc(G_NAME[g])}</div><div class="muted small">${esc(unit)} · ${NF.format(s.n)} báo giá · ${s.proj} dự án · ${variants.length} cách ghi tên · mới nhất ${s.latest || '–'}${DROP.src ? ' · chỉ ' + esc(DROP.src) : ''}</div>${srcSeg}</div>
+      <div class="kpis dp-kpis${ratios.length > 1 ? ' k4' : ''}">
         <div class="kpi"><div class="k">Đơn giá đại diện (${base})</div><div class="v">${money(s.med)}</div></div>
         <div class="kpi"><div class="k">Khoảng phổ biến P25–P75</div><div class="v small-v">${money(s.p25)} – ${money(s.p75)}</div></div>
-        <div class="kpi"><div class="k">Trung bình</div><div class="v small-v">${money(s.mean)}</div></div>
+        ${ratios.length ? ratios.map(r => `<div class="kpi"><div class="k">${esc(r.k)} so với Nội bộ</div><div class="v small-v">×${(Math.round(r.v * 100) / 100).toLocaleString('vi-VN', { minimumFractionDigits: 2 })}</div><div class="s">${pctTxt(r.v)} theo trung vị</div></div>`).join('')
+          : `<div class="kpi"><div class="k">Trung bình</div><div class="v small-v">${money(s.mean)}</div></div>`}
       </div></div>
+    ${multi ? `<div class="card full"><h3>${esc([...bs.keys()].join(', '))} rơi ở đâu?</h3><div class="cap">Cùng nhóm đại diện, giá quy về ${base}. Hộp = P25–P75, vạch trắng = trung vị, râu = P10–P90.${ratios.length ? ` Trung vị so với Nội bộ: ${ratios.map(r => `${esc(r.k)} ${pctTxt(r.v)}`).join(', ')}.` : ''}</div>
+      <div class="chart">${boxes(srcRows.map(r => ({ ...r, k: `${r.k} · ${r.proj} DA`, color: SRC_COLOR[r.k] })), unit, 1100)}</div></div>` : ''}
     <div class="grid2">
-      <div class="card"><h3>Giá phổ biến nằm ở đâu?</h3><div class="cap">Số báo giá theo mức giá (quy về ${base}). Cột xanh = vùng phổ biến P25–P75; nét đứt = đơn giá đại diện.</div>
+      <div class="card"><h3>Giá phổ biến nằm ở đâu?</h3><div class="cap">Số báo giá theo mức giá (quy về ${base})${mixed ? ', gộp các nguồn' : ''}. Cột xanh = vùng phổ biến P25–P75; nét đứt = đơn giá đại diện.</div>
         <div class="chart">${CH.vbar(hist, { fmt: v => NF.format(v), H: 230, vline: (s.med - lo) / w })}</div></div>
-      <div class="card"><h3>Giá thay đổi theo thời gian?</h3><div class="cap">Mỗi chấm = 1 báo giá (giá gốc theo năm, /${esc(unit)}); đường = trung vị từng năm.</div>
-        <div class="chart">${CH.scatter(pts, { yfmt: CH.short, xfmt: v => String(Math.round(v)), H: 250, lines: [{ pts: medLine, color: 'var(--series-2)' }] })}</div></div>
+      <div class="card"><h3>Giá thay đổi theo thời gian?</h3><div class="cap">Mỗi chấm = 1 báo giá (giá gốc theo năm, /${esc(unit)}); đường = trung vị từng năm${mixed ? ' của từng nguồn' : ''}.${noYear ? ` ${noYear} báo giá không có năm không hiện ở đây.` : ''}</div>
+        ${legend}<div class="chart">${CH.scatter(pts, { yfmt: CH.short, xfmt: v => String(Math.round(v)), H: 250, lines })}</div></div>
     </div>
     <div class="grid2">
       <div class="card"><h3>Khác nhau theo ${dim === 'prov' ? 'tỉnh/TP' : 'loại hình dự án'}?</h3>
@@ -693,12 +799,12 @@ function renderDrop() {
   writeHash();
 }
 
-/* ---------- Chuyển bộ dữ liệu (nội bộ / CTG / đối thủ) ngay trong trang ---------- */
+/* ---------- Chuyển bộ dữ liệu (nội bộ / đối thủ) ngay trong trang ---------- */
 // Không tải lại trang: khóa giải mã chỉ nằm trong bộ nhớ của trang, tải lại là đăng xuất.
 // Bộ đã mở được giữ nguyên (chỉ mục, bộ lọc đang chọn) để chuyển qua lại không phải giải mã lại; đăng xuất xóa hết.
 const GOC = {};     // tiêu đề, gợi ý ô tìm của dữ liệu nội bộ
 const CACHE = {};   // ds -> trạng thái bộ đã mở
-const chup = () => ({ DB, C, D, N, nameNorm, docNorm, vocab, postings, parVocab, parPost, parRows, FACETS, G_ROWS, G_NAME, G_UNIT });
+const chup = () => ({ DB, C, D, N, nameNorm, docNorm, vocab, postings, parVocab, parPost, parRows, FACETS, G_ROWS, G_NAME, G_UNIT, G_SRC });
 let dangChuyen = false;
 function setupNav() {
   const t = $('.brand .title');
@@ -706,22 +812,29 @@ function setupNav() {
   const nav = $('.topnav');
   if (!nav) return;
   const ctg = $('.nav-ctg', nav), dt = $('.nav-dt', nav);
-  if (ctg) ctg.dataset.ds = 'ctg';
+  if (ctg) ctg.remove();   // CTG nằm trong dữ liệu nội bộ (bộ lọc "Nguồn dữ liệu"), không còn mục riêng
   if (dt) dt.dataset.ds = 'doithu';
   const a = document.createElement('a');
   a.href = 'index.html'; a.className = 'nav-noibo'; a.dataset.ds = 'noibo'; a.textContent = 'Dữ liệu nội bộ';
-  nav.insertBefore(a, ctg || dt);
+  nav.insertBefore(a, dt);
+}
+// "12.345 đơn giá (Nội bộ 10.000 · CTG 2.000 · Đối thủ 345)" khi dữ liệu có từ 2 nguồn
+function demNguon() {
+  if (!C.ng || !D.ng || D.ng.length < 2) return '';
+  const cnt = new Map();
+  for (let i = 0; i < N; i++) { const s = srcOf(i); cnt.set(s, (cnt.get(s) || 0) + 1); }
+  return cnt.size > 1 ? ` (${[...cnt].sort((a, b) => NGUON_THU_TU.indexOf(a[0]) - NGUON_THU_TU.indexOf(b[0])).map(([k, n]) => `${k} ${NF.format(n)}`).join(' · ')})` : '';
 }
 function applyDS() {
   const root = document.documentElement;
-  root.classList.remove('ds-ctg', 'ds-doithu');
-  if (RIENG) root.classList.add('ds-' + DS);
+  root.classList.remove('ds-sub', 'ds-doithu');
+  if (RIENG) root.classList.add('ds-sub', 'ds-' + DS);
   document.title = RIENG ? RIENG.title : GOC.title;
   const t = $('.brand .title'); if (t) t.textContent = RIENG ? RIENG.title : GOC.brand;
   $('#q').placeholder = RIENG ? RIENG.ph : GOC.ph;
   $$('.topnav [data-sec]').forEach(a => { a.hidden = !!RIENG; });   // bộ riêng: chỉ tra cứu
   $$('.topnav [data-ds]').forEach(a => { a.classList.toggle('on', a.dataset.ds === DS); if (a.dataset.ds === 'noibo') a.hidden = !RIENG; });
-  $('#db-meta').textContent = `${NF.format(N)} đơn giá · ${NF.format(D.p.length)} dự án · ${NF.format(D.f.length)} file nguồn · cập nhật ${DB.built}`;
+  $('#db-meta').textContent = `${NF.format(N)} đơn giá${demNguon()} · ${NF.format(D.p.length)} dự án · ${NF.format(D.f.length)} file nguồn · cập nhật ${DB.built}`;
 }
 function switchDS(ds) {
   if (ds === DS || dangChuyen || (DS_RIENG[ds] && ROLE !== 'admin')) return;
@@ -733,8 +846,8 @@ function switchDS(ds) {
     CACHE[DS] = chup();
     DS = ds; RIENG = DS_RIENG[ds] || null;
     if (db) useDB(db);
-    else { ({ DB, C, D, N, nameNorm, docNorm, vocab, postings, parVocab, parPost, parRows, FACETS, G_ROWS, G_NAME, G_UNIT } = CACHE[ds]); applyDS(); }
-    expCache.clear(); DROP.g = null; DROP.top = null; lastSearchQ = null;
+    else { ({ DB, C, D, N, nameNorm, docNorm, vocab, postings, parVocab, parPost, parRows, FACETS, G_ROWS, G_NAME, G_UNIT, G_SRC } = CACHE[ds]); applyDS(); }
+    expCache.clear(); DROP.g = null; DROP.tops = {}; lastSearchQ = null;
     $('#toast').hidden = true;
     run();
     window.scrollTo({ top: 0 });
@@ -871,7 +984,21 @@ function bindUI() {
   $('#drawer-close').onclick = closeDrawer; $('#drawer-bg').onclick = closeDrawer;
   $('#dp-q').addEventListener('input', debounce(renderDropPicker, 200));
   $('#dp-list').onclick = e => { const b = e.target.closest('[data-g]'); if (b) { DROP.g = +b.dataset.g; renderDrop(); } };
-  $('#dp-view').onclick = e => { const b = e.target.closest('[data-dim]'); if (b) { DROP.dim = b.dataset.dim; renderDrop(); } };
+  $('#dp-view').onclick = e => {
+    const b = e.target.closest('[data-dim]'); if (b) { DROP.dim = b.dataset.dim; renderDrop(); return; }
+    const s = e.target.closest('[data-dsrc]'); if (s) { DROP.src = s.dataset.dsrc; renderDrop(); }
+  };
+  // Điểm rơi giá so sánh các nguồn của dữ liệu nội bộ (Nội bộ, CTG, Đối thủ): chữ trên trang theo đúng các nguồn đang có
+  const nguon = C.ng && D.ng.length > 1 ? [...D.ng].sort(thuTu) : null;
+  const both = $('#dp-both');
+  if (both) {
+    const lb = both.closest('label');
+    lb.hidden = !nguon;
+    if (nguon && lb.lastChild.nodeType === 3) lb.lastChild.textContent = ` Chỉ nhóm có giá từ 2 nguồn trở lên (${nguon.join(', ')})`;
+    both.onchange = () => { DROP.both = both.checked; renderDropPicker(); };
+  }
+  const intro = $('#sec-drop .intro');
+  if (intro && nguon) intro.textContent = `Chọn một nhóm công việc để xem giá phổ biến nằm ở đâu, thay đổi theo thời gian, khác nhau theo tỉnh/loại hình — và so sánh giá giữa các nguồn ${nguon.join(', ')} của cùng nhóm.`;
   CH.bindTips(document);
   setupLazy();
   window.addEventListener('hashchange', () => { const sec = readHash(); lastSearchQ = null; run(); showSection(sec); });

@@ -1,19 +1,22 @@
 # -*- coding: utf-8 -*-
-"""Dựng bản web từ giao diện WEB/ và lớp bảo vệ shared/ (chạy trên máy admin).
+"""Dựng bản web từ giao diện 3_WEB_OFFLINE/ và lớp bảo vệ shared/ (chạy trên máy admin).
 
     docs/            BẢN ADMIN. Đưa lên GitHub. Bật GitHub Pages: Settings → Pages → Deploy from a branch → /docs.
-    dist/nhan_vien/  BẢN NHÂN VIÊN. Phát hành offline cùng gói DonGiaBOQ_nhanvien.dgbw. Không đưa lên GitHub.
+    dist/            DonGiaBOQ_web_nhanvien.zip — BẢN NHÂN VIÊN, phát hành offline cùng gói DonGiaBOQ_nhanvien.dgbw
+                     (thư mục 6_GOI_DU_LIEU_WEBAPP). Không đưa lên GitHub.
 
 Module "Điền giá BOQ" (mã nguồn riêng trong modules/de_xuat_gia/) được GHÉP vào app tra cứu: thêm mục
 "Điền giá BOQ" trên thanh điều hướng, chỉ tài khoản admin thấy; dùng chung lần đăng nhập và CSDL đã nạp.
 Mã module chép vào <bản>/assets/dxg/, CSS được giới hạn trong #sec-dxg để không ảnh hưởng giao diện app.
 
-Bộ dữ liệu "CTG" (CSDL chiết tính giá, index.html?ds=ctg) là dữ liệu riêng của admin như "Đối thủ": app nạp khối "ctg"
-của gói admin. Khối này do modules/ctg/dong_goi.js thêm vào gói admin; build.py chỉ thêm mục CTG trên thanh điều hướng.
+Dữ liệu nội bộ của bản admin gồm ba nguồn: Nội bộ + CTG (khối db, 2_XU_LY làm sạch chung) và đối thủ (khối doithu).
+App tra cứu gộp đối thủ vào khi nạp bằng mergeDB của modules/de_xuat_gia/assets/pricing.js, để Điểm rơi giá, Phân tích
+(So sánh nguồn) và Điền giá BOQ dùng chung cả ba nguồn. Vì vậy pricing.js được nạp TRƯỚC app.js. CTG đóng gói riêng
+(khối ctg của modules/ctg/dong_goi.js) chỉ được gộp khi khối db chưa có CTG. Bản nhân viên không có module, không gộp.
 
-Hai bản chỉ chứa MÃ. Không sao chép WEB/data và không sao chép gói dữ liệu.
+Hai bản chỉ chứa MÃ. Không sao chép 3_WEB_OFFLINE/data và không sao chép gói dữ liệu.
 Dùng: python build.py              dựng app tra cứu + ghép module
-      python build.py --module     chỉ ghép lại module vào bản đã dựng (không cần thư mục WEB)
+      python build.py --module     chỉ ghép lại module vào bản đã dựng (không cần thư mục 3_WEB_OFFLINE)
 """
 import hashlib
 import os
@@ -23,7 +26,7 @@ import sys
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-WEB = os.path.normpath(os.path.join(HERE, "..", "..", "WEB"))
+WEB = os.path.normpath(os.path.join(HERE, "..", "3_WEB_OFFLINE"))
 SHARED = os.path.join(HERE, "shared")
 DOCS = os.path.join(HERE, "docs")
 NHAN_VIEN = os.path.join(HERE, "dist", "nhan_vien")
@@ -38,22 +41,32 @@ DXG_CHO_NHAN_VIEN = False
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
        "connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'")
 
-CAM_TEN = re.compile(r"(^db\.js$|^doithu\.js$|^ctg\.js$|^analysis\.js$|\.dgbw$|\.enc$|\.xlsx$|^tai_khoan\.json$|^thong_tin\.json$)", re.I)
+CAM_TEN = re.compile(r"(^db\.js$|^doithu\.js$|^analysis\.js$|^ctg\.js$|\.dgbw$|\.enc$|\.xlsx$|^tai_khoan\.json$|^thong_tin\.json$)", re.I)
 CAM_NOI_DUNG = re.compile(r"window\.(DB|AN|DT|CTG)\s*=\s*\{")
-NAV_CTG = '<a href="index.html?ds=ctg" class="nav-ctg" title="CSDL chiết tính giá (vật tư + nhân công) — dữ liệu riêng, chỉ admin">CTG</a>'
+
+
+def don_sach(thu_muc):
+    """Xóa nội dung cũ. Thư mục đang bị Explorer/trình theo dõi file giữ thì để lại vỏ rỗng và ghi đè vào."""
+    for root, dirs, files in os.walk(thu_muc, topdown=False):
+        for f in files:
+            os.remove(os.path.join(root, f))
+        for d in dirs:
+            try:
+                os.rmdir(os.path.join(root, d))
+            except OSError:
+                pass
 
 
 def dung_ban(thu_muc, vai_tro):
-    if os.path.exists(thu_muc):
-        shutil.rmtree(thu_muc)
-    os.makedirs(os.path.join(thu_muc, "shared"))
+    don_sach(thu_muc)
+    os.makedirs(os.path.join(thu_muc, "shared"), exist_ok=True)
     for f in SHARED_FILES:
         shutil.copy2(os.path.join(SHARED, f), os.path.join(thu_muc, "shared", f))
-    shutil.copytree(os.path.join(WEB, "assets"), os.path.join(thu_muc, "assets"))
+    shutil.copytree(os.path.join(WEB, "assets"), os.path.join(thu_muc, "assets"), dirs_exist_ok=True)
 
     src = open(os.path.join(WEB, "index.html"), encoding="utf-8").read()
-    assert len(re.findall(r'<script src="assets/[^"]+"></script>', src)) >= 4, "index.html thiếu script ứng dụng (kiểm tra WEB/index.html)"
-    out = gan_cong_bao_ve(gan_nav_ctg(src), vai_tro, "shared")
+    assert len(re.findall(r'<script src="assets/[^"]+"></script>', src)) >= 4, "index.html thiếu script ứng dụng (kiểm tra 3_WEB_OFFLINE/index.html)"
+    out = gan_cong_bao_ve(src, vai_tro, "shared")
 
     out = gan_dien_gia(out, thu_muc, vai_tro)
 
@@ -64,7 +77,7 @@ def dung_ban(thu_muc, vai_tro):
 def gan_cong_bao_ve(src, vai_tro, goc_shared):
     """Chèn CSP + cổng đăng nhập vào index.html nguồn; script ứng dụng chỉ được nạp sau khi đăng nhập."""
     dung_scripts = re.findall(r'<script src="(assets/[^"]+)"></script>\n?', src)
-    assert dung_scripts, "index.html thiếu script ứng dụng"
+    assert len(dung_scripts) >= 4, "index.html thiếu script ứng dụng (kiểm tra 3_WEB_OFFLINE/index.html)"
     assert "<script>" not in src, "index.html có script nội tuyến — không tương thích CSP"
     out = re.sub(r'<script src="assets/[^"]+"></script>\n?', "", src)
     head = ('<meta name="robots" content="noindex,nofollow">\n'
@@ -79,19 +92,14 @@ def gan_cong_bao_ve(src, vai_tro, goc_shared):
     return out.replace("</body>", body + "</body>", 1)
 
 
-def gan_nav_ctg(html):
-    """Thêm mục CTG trên thanh điều hướng, ngay trước mục Đối thủ, nếu WEB/index.html chưa có."""
-    if "ds=ctg" in html:
-        return html
-    return re.sub(r'(\s*)(<a href="index\.html\?ds=doithu")', lambda m: m.group(1) + NAV_CTG + m.group(1) + m.group(2), html, count=1)
-
-
 def kiem_tra_web():
-    """docs/ được dựng lại từ WEB/assets: WEB chưa có bộ dữ liệu CTG thì bản dựng mới sẽ mất mục CTG đang có."""
-    app = open(os.path.join(WEB, "assets", "app.js"), encoding="utf-8", errors="ignore").read()
-    if not re.search(r"""['"]ctg['"]""", app):
-        sys.exit("DỪNG: WEB/assets/app.js chưa có bộ dữ liệu CTG (chiết tính giá). Chép docs/assets/app.js và "
-                 "docs/assets/app.css sang WEB/assets/ rồi chạy lại, nếu không bản dựng mới sẽ mất mục CTG.")
+    """docs/ được dựng lại từ 3_WEB_OFFLINE/assets: bản ở đó chưa gộp nguồn (đối thủ, CTG cho Điểm rơi giá và Phân tích)
+    thì bản dựng mới sẽ mất các chức năng này."""
+    doc = lambda f: open(os.path.join(WEB, "assets", f), encoding="utf-8", errors="ignore").read() if os.path.isfile(os.path.join(WEB, "assets", f)) else ""
+    if "NGUON_PHU" not in doc("app.js") or "TABS.nguon" not in doc("dash.js"):
+        sys.exit("DỪNG: 3_WEB_OFFLINE/assets chưa có bản app gộp nguồn (Nội bộ / CTG / Đối thủ cho Điểm rơi giá và Phân tích). "
+                 "Chép docs/assets/app.js, app.css, dash.js sang 3_WEB_OFFLINE/assets/ rồi chạy lại, "
+                 "nếu không bản dựng mới sẽ mất các chức năng này.")
 
 
 def css_trong_muc(css, goc="#sec-dxg"):
@@ -140,7 +148,7 @@ def gan_dien_gia(html, thu_muc, vai_tro, cho_nhan_vien=None):
     nv = DXG_CHO_NHAN_VIEN if cho_nhan_vien is None else cho_nhan_vien
     html = re.sub(r"<!--DXG-->.*?<!--/DXG-->\r?\n?", "", html, flags=re.S)
     html = re.sub(r'<a href="de-xuat-gia/index.html"[^>]*>[^<]*</a>', "", html)   # liên kết trang riêng cũ
-    html = re.sub(r"(data-scripts=\"[^\"]*?)(,assets/dxg/[^,\"]+)+", r"\1", html)
+    html = re.sub(r'data-scripts="[^"]*"', lambda m: re.sub(r',assets/dxg/[^,"]+', "", m.group(0)), html)
     dich = os.path.join(thu_muc, "assets", "dxg")
     if os.path.exists(dich):
         shutil.rmtree(dich)
@@ -164,7 +172,10 @@ def gan_dien_gia(html, thu_muc, vai_tro, cho_nhan_vien=None):
     nl = "\r\n" if "\r\n" in html else "\n"
     html = html.replace("</head>", f'<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v={v}"><!--/DXG-->{nl}</head>', 1)
     html = re.sub(r'(<script src="[^"]*crypto-web\.js")', lambda m: f'<!--DXG--><template id="dxg-tpl">{giao_dien}</template><!--/DXG-->{nl}' + m.group(1), html, count=1)
-    them = "".join(f",assets/dxg/{f}?v={v}" for f in DXG_JS)
+    # pricing.js nạp TRƯỚC app.js: app tra cứu dùng mergeDB để gộp nguồn đối thủ / CTG vào dữ liệu nội bộ
+    truoc = f",assets/dxg/pricing.js?v={v}"
+    html, co_app = re.subn(r'(data-scripts="[^"]*?)(,assets/app\.js)', lambda m: m.group(1) + truoc + m.group(2), html, count=1)
+    them = "".join(f",assets/dxg/{f}?v={v}" for f in DXG_JS if co_app == 0 or f != "pricing.js")
     html = re.sub(r'(data-scripts="[^"]*)"', lambda m: m.group(1) + them + '"', html, count=1)
     return html
 
@@ -198,7 +209,7 @@ def main():
             print(f"✓ Ghép module Điền giá BOQ → {thu_muc}")
         return
     if not os.path.isdir(WEB):
-        sys.exit(f"Không thấy {WEB}. Cần thư mục WEB của dự án để lấy giao diện.")
+        sys.exit(f"Không thấy {WEB}. Cần thư mục 3_WEB_OFFLINE của dự án để lấy giao diện.")
     kiem_tra_web()
     dung_ban(DOCS, "admin")
     kiem_tra_dau_ra(DOCS)
@@ -211,8 +222,8 @@ def main():
             for name in files:
                 full = os.path.join(root, name)
                 z.write(full, os.path.join("DonGiaBOQ_web", os.path.relpath(full, NHAN_VIEN)))
+    shutil.rmtree(NHAN_VIEN, ignore_errors=True)   # chỉ giữ bản zip cho nhẹ
     print(f"✓ Bản admin:    {DOCS}  (đưa lên GitHub)")
-    print(f"✓ Bản nhân viên: {NHAN_VIEN}")
     print(f"✓ Gói zip nhân viên: {zip_path}")
 
 

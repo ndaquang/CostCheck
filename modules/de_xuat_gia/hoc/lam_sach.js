@@ -2,15 +2,21 @@
 /* LÀM SẠCH CSDL ĐƠN GIÁ — soát lỗi dữ liệu làm giảm tỉ lệ khớp và làm sai giá tham khảo.
    Dùng: node modules/de_xuat_gia/hoc/lam_sach.js [--db data/db.js] [--them data/doithu.js] [--out <thư mục>] [--sua <db_sach.js>] [--gan-nhom] [--nhanh]
      --db        CSDL thật (window.DB = {...}); bỏ trống = CSDL giả lập của bộ chạy thử
+     --du-lieu   thư mục data (db.js + doithu.js, ctg.js nếu có), vd 3_WEB_OFFLINE/data — đủ ba nguồn Nội bộ, CTG, Đối thủ
+     --goi       gói admin .dgbw (kèm --user <admin>): đọc thẳng các khối db, doithu, ctg của gói
      --them      gộp thêm nguồn giá cùng định dạng để soát chung (vd đối thủ, CTG); không dùng cùng --sua
+                 Có nhiều nguồn: mỗi dòng lỗi ghi Nguồn, sheet Tóm tắt đếm theo nguồn. Ngoại lai xét trong nhóm đã gộp các nguồn.
      --sua       ghi CSDL đã sửa các lỗi an toàn: bỏ giá không hợp lệ, bỏ dòng trùng hệt, đánh dấu ngoại lai chưa đánh dấu
+                 (chỉ soát và sửa CSDL chính: với --du-lieu / --goi là khối db, không gộp đối thủ)
      --gan-nhom  (kèm --sua) gán nhóm cho dòng chưa có nhóm khi gợi ý rất chắc (khớp ≥ 0.85, cùng đơn vị)
      --nhanh     bỏ bước dò dòng có thể sai nhóm (chậm với CSDL rất lớn)
    Kết quả: BAO_CAO_LAM_SACH.xlsx (Tóm tắt + mỗi loại lỗi một sheet) và lam_sach.json. CSDL gốc không bị sửa. */
-const { DXG, fs, path, arg, flag, loadDB, writeXlsx } = require('./chung.js');
+const { DXG, fs, path, arg, flag, loadDB, moTaNguon, nguonCua, inNguon, writeXlsx } = require('./chung.js');
 
 if (arg('--sua') && arg('--them')) { console.error('--sua chỉ dùng với MỘT CSDL (không kèm --them), để bản sửa không trộn nguồn giá khác vào CSDL nội bộ.'); process.exit(2); }
-const { db: DB, demo, nguon } = loadDB(arg('--db') && path.resolve(arg('--db')));
+const { db: DB, nhan, nguon, boQua } = loadDB(arg('--db') && path.resolve(arg('--db')), { them: !arg('--sua') });
+inNguon(nguon);
+if (boQua.length) console.log(`--sua: chỉ soát và sửa CSDL chính, không gộp ${boQua.join(', ')}.`);
 const OUT = path.resolve(arg('--out') || path.join(__dirname, 'ket_qua_lam_sach'));
 fs.mkdirSync(OUT, { recursive: true });
 const t0 = Date.now();
@@ -20,9 +26,10 @@ const prj = i => { const p = (DB.projects || [])[has('p') ? C.p[i] : -1]; return
 const file = i => (has('f') && C.f[i] >= 0 && D.f ? D.f[C.f[i]] : '') || '';
 const gOf = new Int32Array(N).fill(-1);
 for (const g of IX.groups) for (const i of g.rows) gOf[i] = g.id;
-const row = i => [i, prj(i), file(i), C.name[i], IX.unitOf(i), IX.price(i), gOf[i] >= 0 ? IX.groups[gOf[i]].name : '(chưa có nhóm)'];
-const HEAD = ['Dòng CSDL', 'Dự án', 'File nguồn', 'Mô tả', 'Đơn vị', 'Giá quy đổi', 'Nhóm hiện tại'];
-const W = [9, 9, 22, 55, 8, 14, 40];
+const src = i => nguonCua(DB, i);
+const row = i => [i, prj(i), src(i), file(i), C.name[i], IX.unitOf(i), IX.price(i), gOf[i] >= 0 ? IX.groups[gOf[i]].name : '(chưa có nhóm)'];
+const HEAD = ['Dòng CSDL', 'Dự án', 'Nguồn', 'File nguồn', 'Mô tả', 'Đơn vị', 'Giá quy đổi', 'Nhóm hiện tại'];
+const W = [9, 9, 9, 22, 55, 8, 14, 40];
 const issues = {};   // loại -> { title, why, fix, head, rows, safe }
 const add = (k, meta, r) => { (issues[k] = issues[k] || { ...meta, rows: [] }).rows.push(r); };
 
@@ -41,7 +48,7 @@ const M = {
 
 // 1. Giá không hợp lệ (buildIndex đã bỏ qua các dòng này)
 const p0 = i => (has('p26') && C.p26[i] != null) ? C.p26[i] : (has('cp') && C.cp[i] != null) ? C.cp[i] : C.tot[i];
-for (let i = 0; i < N; i++) { const p = p0(i); if (!(typeof p === 'number' && isFinite(p) && p > 0)) add('gia', M.gia, [i, prj(i), file(i), C.name[i], IX.unitOf(i), p ?? '', '']); }
+for (let i = 0; i < N; i++) { const p = p0(i); if (!(typeof p === 'number' && isFinite(p) && p > 0)) add('gia', M.gia, [i, prj(i), src(i), file(i), C.name[i], IX.unitOf(i), p ?? '', '']); }
 // 2. Trùng hệt
 const seen = new Map(), dup = new Set();
 for (let i = 0; i < N; i++) {
@@ -116,20 +123,24 @@ const SPECIAL = {
   donvi_la: [['Cách ghi đơn vị', 'Phần mềm hiểu là', 'Số dòng'], [20, 20, 10]],
   phan_tan: [['Nhóm', 'Đơn vị', 'Số báo giá', 'Số dự án', 'P25', 'P50', 'P75', '(P75−P25)/P50'], [50, 8, 10, 9, 14, 14, 14, 13], [4, 5, 6], [7]],
   nhom_trung: [['Nhóm giữ', 'Số dòng', 'Nhóm trùng', 'Số dòng', 'Đơn vị'], [50, 9, 50, 9, 8]],
-  gia: [HEAD.slice(0, 6).concat(['']), W],
+  gia: [HEAD.slice(0, 7).concat(['']), W],
 };
 const order = Object.keys(M).filter(k => issues[k]);
 const total = order.reduce((n, k) => n + issues[k].rows.length, 0);
+// Nhiều nguồn: đếm thêm theo nguồn các loại lỗi theo dòng (cột Nguồn của dòng); lỗi theo nhóm / đơn vị không tách nguồn
+const NGUON = moTaNguon(DB) ? [...new Set(Array.from({ length: N }, (_, i) => src(i)))] : [];
+const THEO_DONG = new Set(['gia', 'trung', 'ngoailai', 'donvi_lech', 'ten_xau', 'chua_nhom', 'sai_nhom']);
+const demTheo = (k, l) => !issues[k] ? 0 : THEO_DONG.has(k) ? issues[k].rows.filter(r => r[2] === l).length : '';
 const sum = {
   name: 'Tóm tắt', title: 'LÀM SẠCH CSDL ĐƠN GIÁ',
-  note: `CSDL: ${demo ? 'GIẢ LẬP (bộ chạy thử)' : arg('--db')}${nguon.length ? ' + ' + nguon.map(x => `${x.label} (${x.file}, ${x.dong} dòng)`).join(' + ') : ''} · ${N.toLocaleString('vi-VN')} dòng · ${IX.groups.length.toLocaleString('vi-VN')} nhóm · dựng ${DB.built || '?'}\nDữ liệu sạch giúp: khớp đúng nhóm hơn (đơn vị, tên nhóm thống nhất) và giá tham khảo P25/P50 đáng tin hơn (không lẫn giá nhập sai).`,
-  header: ['Loại lỗi', 'Số mục', 'Vì sao cần sửa', 'Cách sửa', 'Sửa tự động (--sua)'], widths: [26, 10, 70, 60, 14],
-  rows: Object.keys(M).map(k => [M[k].title, issues[k] ? issues[k].rows.length : 0, M[k].why, M[k].fix, M[k].safe ? 'có' : k === 'chua_nhom' ? 'với --gan-nhom' : 'không']),
+  note: `CSDL: ${nhan}${nguon.length ? ' + ' + nguon.filter(x => !x.coSan).map(x => `${x.label} (${x.file}, ${x.dong} dòng)`).join(' + ') : ''} · ${N.toLocaleString('vi-VN')} dòng${NGUON.length ? ` (${moTaNguon(DB)})` : ''} · ${IX.groups.length.toLocaleString('vi-VN')} nhóm · dựng ${DB.built || '?'}\nDữ liệu sạch giúp: khớp đúng nhóm hơn (đơn vị, tên nhóm thống nhất) và giá tham khảo P25/P50 đáng tin hơn (không lẫn giá nhập sai).`,
+  header: ['Loại lỗi', 'Số mục', ...NGUON, 'Vì sao cần sửa', 'Cách sửa', 'Sửa tự động (--sua)'], widths: [26, 10, ...NGUON.map(() => 10), 70, 60, 14],
+  rows: Object.keys(M).map(k => [M[k].title, issues[k] ? issues[k].rows.length : 0, ...NGUON.map(l => demTheo(k, l)), M[k].why, M[k].fix, M[k].safe ? 'có' : k === 'chua_nhom' ? 'với --gan-nhom' : 'không']),
 };
 const sheets = [sum, ...order.map(k => {
   const sp = SPECIAL[k], ex = EXTRA[k] || [[], []];
   return { name: M[k].title, title: M[k].title, note: M[k].why + '\n→ ' + M[k].fix,
-    header: sp ? sp[0] : HEAD.concat(ex[0]), widths: sp ? sp[1] : W.concat(ex[1]), money: sp ? sp[2] || [] : [5, ...(k === 'ngoailai' ? [7] : [])], pct: sp ? sp[3] || [] : [],
+    header: sp ? sp[0] : HEAD.concat(ex[0]), widths: sp ? sp[1] : W.concat(ex[1]), money: sp ? sp[2] || [] : [6, ...(k === 'ngoailai' ? [8] : [])], pct: sp ? sp[3] || [] : [],
     rows: issues[k].rows.slice(0, 20000) };
 })];
 writeXlsx({ sheets }, path.join(OUT, 'BAO_CAO_LAM_SACH.xlsx'));

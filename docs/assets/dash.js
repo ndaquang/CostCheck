@@ -10,45 +10,58 @@ const NF1 = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 });
 const f0 = v => v === null || v === undefined ? '–' : NF0.format(v);
 const f1 = v => v === null || v === undefined ? '–' : NF1.format(v);
 const pct = v => v === null || v === undefined ? '–' : (v > 0 ? '+' : '') + NF1.format(v) + '%';
-let AN;
+let AN, AN_LOI = null, cur = 'overview';
 
 function boot() {
+  const fail = html => { AN_LOI = html; if (!KHONG_CAN_AN.has(cur)) show(cur); };
   if (window.SECURE) {
     window.SECURE.load('analysis').then(txt => { AN = JSON.parse(txt); init(); })
-      .catch(e => { $('#view').innerHTML = `<div class="empty">Không mở được kết quả phân tích: ${esc(String(e && e.message || e))}</div>`; });
+      .catch(e => fail(`Không mở được kết quả phân tích: ${esc(String(e && e.message || e))}`));
     return;
   }
   const s = document.createElement('script');
   s.src = 'data/analysis.js';
   s.onload = () => { AN = window.AN; init(); };
-  s.onerror = () => {
-    $('#view').innerHTML = '<div class="empty">Chưa có data/analysis.js — chạy <code>python analysis.py</code> trong thư mục WEB (sau CLEANED/clean_data.py).</div>';
-  };
+  s.onerror = () => fail('Chưa có data/analysis.js — chạy <code>2_XU_LY\\CAP_NHAT_DU_LIEU.bat</code> (hoặc <code>python analysis.py</code> sau <code>clean_data.py</code>).');
   document.body.appendChild(s);
 }
 
 const TABS = {};
+const KHONG_CAN_AN = new Set(['nguon']);   // tính ngay trên dữ liệu đã nạp của app tra cứu, không cần analysis.js
 function init() {
   const o = AN.overview;
   $('#an-meta').textContent = `Kết quả phân tích lúc ${AN.built} · ${f0(o.rows)} đơn giá sạch · ${f0(o.projects)} dự án · ${o.years[0]}–${o.years[1]}`;
-  $('#tabs').onclick = e => { const b = e.target.closest('button[data-tab]'); if (b) show(b.dataset.tab); };
-  show('overview');
+  show(cur);
 }
 const TECH = { anomaly: 'Bất thường (ML)', names: 'Chuẩn hóa & phân loại', algos: '50 thuật toán – giả sử áp dụng' };
-const TAB_NAME = { overview: 'Tổng quan', index: 'Chỉ số giá', factors: 'Tỉnh & loại hình', labour: 'Vật liệu – nhân công', mc: 'Mô phỏng chi phí',
+const TAB_NAME = { overview: 'Tổng quan', index: 'Chỉ số giá', factors: 'Tỉnh & loại hình', labour: 'Vật liệu – nhân công', nguon: 'So sánh nguồn', mc: 'Mô phỏng chi phí',
   cluster: 'Phân cụm dự án', articles: 'Bài phân tích', bench: 'Mô phỏng chi phí', ...TECH };
 let techSub = 'anomaly';
 function show(tab) {
   if (tab === 'bench') tab = 'mc';
   if (TECH[tab]) { techSub = tab; tab = 'tech'; }
   if (!TABS[tab]) tab = 'overview';
+  cur = tab;
   $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $('#view').innerHTML = '';
+  if (!AN && !KHONG_CAN_AN.has(tab)) { $('#view').innerHTML = `<div class="empty">${AN_LOI || 'Đang nạp kết quả phân tích…'}</div>`; return; }
   TABS[tab]($('#view'));
   window.scrollTo({ top: 0 });
 }
 let started = false;
-function start() { if (!started) { started = true; boot(); } }
+function start() {
+  if (started) return;
+  started = true;
+  const tabs = $('#tabs');
+  if (!$('[data-tab="nguon"]', tabs)) {   // index.html cũ chưa có thẻ So sánh nguồn
+    const b = document.createElement('button');
+    b.dataset.tab = 'nguon'; b.textContent = TAB_NAME.nguon;
+    tabs.insertBefore(b, $('[data-tab="mc"]', tabs));
+  }
+  tabs.onclick = e => { const b = e.target.closest('button[data-tab]'); if (b) show(b.dataset.tab); };
+  show(cur);
+  boot();
+}
 const head = (title, intro, method, algos = []) =>
   `<h2>${title}</h2><p class="intro">${intro}</p>` +
   (method ? `<div class="method">${algos.map(a => `<span class="algo-chip">#${a}</span>`).join('')}<b>Phương pháp:</b> ${method}</div>` : '');
@@ -69,8 +82,12 @@ TABS.overview = v => {
   const o = AN.overview, q = o.quality, tot = q.scores.length ? q.scores[q.scores.length - 1] : null;
   const st = Object.fromEntries(o.byStatus);
   const sevOrder = { 'Cao': 0, 'Trung bình': 1, 'Thấp': 2, 'Thông tin': 3 };
-  v.innerHTML = head('Tổng quan cơ sở dữ liệu đơn giá', 'Dữ liệu sau khi làm sạch (CLEANED/CSDL_DON_GIA_SACH.xlsx). Dòng REVIEW vẫn được giữ nhưng cần xem lý do trước khi dùng làm giá tham khảo.') +
-    `<div class="kpis">${kpi('Dòng đơn giá sạch', f0(o.rows), `${f0(st.KEEP || 0)} KEEP · ${f0(st.REVIEW || 0)} REVIEW`)}${kpi('Dòng dùng phân tích', f0(o.rowsAnalysis), 'bỏ ngoại lai nghi sai & trùng chéo dự án')}${kpi('Dự án', f0(o.projects))}${kpi('Hạng mục duy nhất', f0(o.items), 'tên chuẩn hóa + đơn vị')}${kpi('Giai đoạn', `${o.years[0]}–${o.years[1]}`)}${tot ? kpi('Điểm chất lượng', `${f1(tot[2])}<small style="font-size:13px;color:var(--muted)">/100</small>`, `trước làm sạch: ${f1(tot[1])}`) : ''}</div>` +
+  const srcs = o.bySource || [];
+  v.innerHTML = head('Tổng quan cơ sở dữ liệu đơn giá', 'Dữ liệu sau khi làm sạch (2_XU_LY/KET_QUA/CSDL_DON_GIA_SACH.xlsx' + (srcs.length > 1 ? ' — gồm Nội bộ và chiết tính giá CTG, đi chung một quy trình' : '') + '). Dòng REVIEW vẫn được giữ nhưng cần xem lý do trước khi dùng làm giá tham khảo.') +
+    `<div class="kpis">${kpi('Dòng đơn giá sạch', f0(o.rows), `${f0(st.KEEP || 0)} KEEP · ${f0(st.REVIEW || 0)} REVIEW`)}${kpi('Dòng dùng phân tích', f0(o.rowsAnalysis), 'bỏ ngoại lai nghi sai, trùng chéo dự án, dòng không có năm')}${kpi('Dự án', f0(o.projects))}${kpi('Hạng mục duy nhất', f0(o.items), 'tên chuẩn hóa + đơn vị')}${kpi('Giai đoạn', `${o.years[0]}–${o.years[1]}`)}${tot ? kpi('Điểm chất lượng', `${f1(tot[2])}<small style="font-size:13px;color:var(--muted)">/100</small>`, `trước làm sạch: ${f1(tot[1])}`) : ''}</div>` +
+    (srcs.length > 1 ? card('Theo nguồn dữ liệu', 'Cùng quy trình làm sạch, cùng nhóm đại diện, cùng mô hình chỉ số giá (có hiệu ứng nguồn).',
+      table([{ t: 'Nguồn' }, { t: 'Dòng sạch', num: 1 }, { t: 'Dự án', num: 1 }, { t: 'Nhóm đại diện', num: 1 }, { t: 'REVIEW', num: 1 }, { t: 'Không có năm', num: 1 }, { t: 'Dùng phân tích', num: 1 }],
+        srcs.map(s => [`<b>${esc(s.name)}</b>`, f0(s.rows), f0(s.projects), f0(s.groups), f0(s.review), f0(s.noYear), f0(s.analysis)])), 'full') : '') +
     `<div class="grid2">${card('Số dòng theo năm báo giá', '', CH.vbar(o.byYear.map(([k, n]) => ({ k, v: n, tip: `${k}: ${f0(n)} dòng` })), { labels: true }))}` +
     card('Số dòng theo nhóm công việc', 'NRM2 nhóm lớn', CH.hbar(o.byGroup.map(([k, n]) => ({ k, v: n, tip: `${k}: ${f0(n)} dòng` })), { L: 210 })) + `</div>` +
     `<div class="grid2">${card('Theo loại hình dự án', '', CH.hbar(o.byType.map(([k, n]) => ({ k, v: n, tip: `${k}: ${f0(n)} dòng` })), { L: 230 }))}` +
@@ -116,6 +133,8 @@ TABS.factors = v => {
   v.innerHTML = head('Hệ số địa điểm & loại hình dự án', 'Cùng hạng mục, cùng năm báo giá: dự án ở tỉnh/loại hình nào đắt hơn? Hệ số 1,00 = mức bình quân toàn CSDL.',
     `Hồi quy bội log(đơn giá) = hạng mục + năm + tỉnh + loại hình (R² = ${F.r2}, ${f0(F.n)} dòng); khoảng tin cậy 90% bằng bootstrap 30 lần theo dự án. Chỉ hiển thị nhóm ≥ 200 dòng.`, [7, 10]) +
     `<div class="grid2">${card('Hệ số theo tỉnh/TP (2025)', 'Vạch ngang = CI 90%. Thanh xám + dấu * = dưới 3 dự án hoặc chưa rõ tỉnh → không dùng làm hệ số.', fac(F.province, 150))}${card('Hệ số theo loại hình dự án', 'Phản ánh cả khác biệt tiêu chuẩn kỹ thuật/hoàn thiện giữa loại hình', fac(F.type, 230))}</div>` +
+    ((F.source || []).length > 1 ? card('Mặt bằng giá theo nguồn dữ liệu (Nội bộ = 1,00)', 'Cùng nhóm công việc, cùng năm, tỉnh, loại hình: chiết tính giá (CTG) cao/thấp hơn giá Nội bộ bao nhiêu. Đây là một yếu tố trong mô hình, nên các hệ số tỉnh/loại hình và chỉ số năm ở trên đã khử chênh lệch này.',
+      fac(F.source, 150) + table([{ t: 'Nguồn' }, { t: 'Hệ số', num: 1 }, { t: 'CI 90%', num: 1 }, { t: 'Dòng', num: 1 }, { t: 'Dự án', num: 1 }], F.source.map(r => [esc(r.name), `<b>${r.factor.toFixed(3)}</b>`, `${r.lo.toFixed(2)}–${r.hi.toFixed(2)}`, f0(r.n), r.projects])), 'full') : '') +
     `<div class="card full"><h3>Ước tính tương tự (analogous) — giả sử áp dụng #7</h3><div class="cap">Chi phí mới = Chi phí gốc × (Q mới / Q gốc)<sup>n</sup> × hệ số năm × hệ số tỉnh × hệ số loại hình. Hệ số lấy từ dữ liệu, n theo bảng tham khảo (nhà xưởng 0,80–0,90).</div>
      <div class="ctrl">
       <label>Chi phí gốc (tỷ) <input type="number" id="an-c" value="45" step="0.5" style="width:90px"></label>
@@ -169,7 +188,7 @@ TABS.bench = v => {
 TABS.labour = v => {
   const Lb = AN.labour;
   v.innerHTML = head('Cơ cấu vật liệu – nhân công', `Tỷ lệ nhân công = NC / (VL + NC + Máy) trên ${f0(Lb.n)} dòng có tách đơn giá thành phần. Dùng để tách rủi ro trượt giá vật liệu và lương.`, null) +
-    `<div class="kpis">${kpi('Tỷ lệ nhân công trung vị', f1(Lb.overall) + '%')}${kpi('Loại công việc phân tích', Lb.byWork.length, '≥ 60 dòng mỗi loại')}</div>` +
+    `<div class="kpis">${kpi('Tỷ lệ nhân công trung vị', f1(Lb.overall) + '%')}${(Lb.bySource || []).length > 1 ? Lb.bySource.map(s => kpi(esc(s.name), f1(s.p50) + '%', `${f0(s.n)} dòng tách VL/NC`)).join('') : ''}${kpi('Loại công việc phân tích', Lb.byWork.length, '≥ 60 dòng mỗi loại')}</div>` +
     `<div class="grid2">${card('Tỷ lệ nhân công theo loại công việc', 'Thanh = trung vị; vạch = P25–P75', CH.hbar(Lb.byWork.slice(0, 30).map(w => ({ k: w.work, v: w.p50, lo: w.p25, hi: w.p75, tip: `${w.work}: trung vị ${f1(w.p50)}% (P25–P75: ${f1(w.p25)}–${f1(w.p75)}%) · ${f0(w.n)} dòng` })), { L: 200, min: 0, max: 100, fmt: v => f0(v) + '%', rowH: 22 }))}` +
     `<div>${card('Tỷ lệ nhân công theo năm', '', CH.line([{ name: 'Tỷ lệ NC', pts: Lb.byYear.map(([y, p, n]) => ({ x: y, y: p, tip: `${y}: ${f1(p)}% · ${f0(n)} dòng` })) }], { fmt: v => f0(v) + '%', H: 200 }))}
      <div class="card" style="margin-top:14px"><h3>Giả sử giá vật liệu thay đổi</h3><div class="cap">ΔĐG ≈ ĐG × (1 − tỷ lệ NC) × %thay đổi VL + ĐG × tỷ lệ NC × %thay đổi lương</div>
@@ -186,8 +205,101 @@ TABS.labour = v => {
   ['#lb-w', '#lb-p', '#lb-m', '#lb-l'].forEach(s => $(s).oninput = calc); calc();
 };
 
+/* ---------- So sánh nguồn: Nội bộ / CTG / Đối thủ ---------- */
+// Tính ngay trên dữ liệu nội bộ đã gộp nguồn của app tra cứu (window.DB, cột ng "Nguồn dữ liệu"; đối thủ do app gộp khi nạp):
+// trong cùng nhóm đại diện, so trung vị giá quy về năm gốc của từng nguồn với Nội bộ. Bỏ dòng REVIEW và ngoại lai đã đánh dấu;
+// mỗi nguồn cần ≥ NG_MIN báo giá trong nhóm. Hệ số > 1 = nguồn đó đắt hơn Nội bộ.
+const NG_MIN = 3, NG_THU_TU = ['Nội bộ', 'CTG', 'Đối thủ'];
+const NG = { db: null, kq: null, src: null, dir: 'cao' };
+const thuTu = (a, b) => ((NG_THU_TU.indexOf(a) + 1) || 99) - ((NG_THU_TU.indexOf(b) + 1) || 99);
+const heSo = r => '×' + (Math.round(r * 100) / 100).toLocaleString('vi-VN', { minimumFractionDigits: 2 });
+const lechPct = r => pct(Math.round((r - 1) * 1000) / 10);
+const qs = (a, p) => { const x = (a.length - 1) * p, lo = Math.floor(x), hi = Math.ceil(x); return a[lo] + (a[hi] - a[lo]) * (x - lo); };
+function soSanhNguon() {
+  const DB = window.DB;
+  if (!DB || !DB.cols || !Array.isArray(DB.cols.ng) || !DB.dicts.ng) return null;
+  if (NG.db === DB && NG.n === DB.count) return NG.kq;
+  const C = DB.cols, D = DB.dicts, N = DB.count, nrm2 = DB.nrm2 || [];
+  const price = i => (C.p26 && C.p26[i] !== null && C.p26[i] !== undefined) ? C.p26[i] : (C.cp && C.cp[i] !== null && C.cp[i] !== undefined) ? C.cp[i] : C.tot[i];
+  const review = Array.isArray(C.st) && D.st ? D.st.indexOf('REVIEW') : -1;
+  const tong = new Map(), nhom = new Map();
+  for (let i = 0; i < N; i++) {
+    const s = D.ng[C.ng[i]] || 'Nội bộ';
+    let t = tong.get(s); if (!t) tong.set(s, t = { n: 0, proj: new Set(), nhom: new Set() });
+    t.n++; t.proj.add(C.p[i]);
+    const g = C.g[i], p = price(i);
+    if (!(g >= 0) || !(p > 0) || (review >= 0 && C.st[i] === review) || (C.ol && C.ol[i] >= 0)) continue;
+    t.nhom.add(g);
+    let e = nhom.get(g);
+    if (!e) nhom.set(g, e = { g, name: C.gn && C.gn[i] >= 0 ? D.gn[C.gn[i]] : C.name[i], unit: C.cu && C.cu[i] >= 0 ? D.cu[C.cu[i]] : (C.u[i] >= 0 ? D.u[C.u[i]] : ''), n: C.n[i], src: new Map() });
+    if (s === 'Nội bộ' && C.n[i] >= 0) e.n = C.n[i];   // nhóm NRM2 theo dòng Nội bộ
+    let a = e.src.get(s); if (!a) e.src.set(s, a = []); a.push(p);
+  }
+  const nguon = [...tong.keys()].sort(thuTu), so = nguon.filter(s => s !== 'Nội bộ');
+  const cap = new Map(so.map(s => [s, []]));   // nguồn → [{ nhóm, hệ số, … }]
+  for (const e of nhom.values()) {
+    const nb = e.src.get('Nội bộ');
+    if (!nb || nb.length < NG_MIN) continue;
+    nb.sort((x, y) => x - y);
+    const mNb = qs(nb, 0.5);
+    for (const s of so) {
+      const a = e.src.get(s);
+      if (!a || a.length < NG_MIN) continue;
+      a.sort((x, y) => x - y);
+      const m = qs(a, 0.5);
+      const nr = nrm2[e.n];
+      cap.get(s).push({ g: e.g, name: e.name, unit: e.unit, nrm: nr ? `${nr[0]} · ${nr[1]}` : '(Chưa phân loại NRM2)', nNb: nb.length, mNb, n: a.length, m, r: m / mNb });
+    }
+  }
+  NG.db = DB; NG.n = DB.count;
+  return NG.kq = { nguon, so, tong, cap };
+}
+TABS.nguon = v => {
+  const K = soSanhNguon();
+  const intro = 'Cùng nhóm đại diện, giá chiết tính (CTG) và giá đối thủ cao / thấp hơn giá Nội bộ bao nhiêu. Tính ngay trên dữ liệu đang mở (gói dữ liệu .dgbw: khối db gồm Nội bộ + CTG, khối doithu), không cần chạy lại phân tích.';
+  const method = `Mỗi nhóm đại diện: hệ số = trung vị giá nguồn ÷ trung vị giá Nội bộ (giá quy về ${window.DB && window.DB.baseYear || 2026}), chỉ nhóm mà mỗi bên có ≥ ${NG_MIN} báo giá; bỏ dòng REVIEW và ngoại lai đã đánh dấu. Nhóm của các nguồn được ghép theo tên nhóm + đơn vị khi nạp dữ liệu.`;
+  if (!K || K.so.length === 0) {
+    v.innerHTML = head('So sánh nguồn dữ liệu', intro, method) + `<div class="empty">Dữ liệu đang mở chỉ có một nguồn${K ? ` (${esc(K.nguon.join(', '))})` : ''}. Cần gói dữ liệu admin có dòng CTG trong khối db (cột Nguồn dữ liệu) hoặc khối doithu (đơn giá đối thủ).</div>`;
+    return;
+  }
+  if (!NG.src || !K.so.includes(NG.src)) NG.src = K.so.find(s => K.cap.get(s).length) || K.so[0];
+  const tom = s => { const c = K.cap.get(s), r = c.map(x => x.r).sort((a, b) => a - b); return { c, r, med: r.length ? qs(r, 0.5) : null, p25: r.length ? qs(r, 0.25) : null, p75: r.length ? qs(r, 0.75) : null, re: c.filter(x => x.r < 1).length }; };
+  const T = new Map(K.so.map(s => [s, tom(s)]));
+  const kpis = K.so.map(s => { const t = T.get(s); return kpi(`${esc(s)} so với Nội bộ`, t.med ? heSo(t.med) : '–', t.med ? `${lechPct(t.med)} theo trung vị · ${f0(t.c.length)} nhóm so được` : 'chưa có nhóm chung đủ dữ liệu'); }).join('');
+  const bang = table([{ t: 'Nguồn' }, { t: 'Dòng', num: 1 }, { t: 'Dự án', num: 1 }, { t: 'Nhóm có giá', num: 1 }, { t: `Nhóm so được với Nội bộ (≥ ${NG_MIN} báo giá mỗi bên)`, num: 1 }, { t: 'Hệ số trung vị', num: 1 }, { t: 'P25–P75 hệ số', num: 1 }, { t: 'Rẻ hơn Nội bộ', num: 1 }],
+    K.nguon.map(s => { const t = K.tong.get(s), x = T.get(s); return [`<b>${esc(s)}</b>`, f0(t.n), f0(t.proj.size), f0(t.nhom.size), x ? f0(x.c.length) : '—', x && x.med ? `<b>${heSo(x.med)}</b>` : '—', x && x.med ? `${heSo(x.p25)} – ${heSo(x.p75)}` : '—', x && x.c.length ? `${f0(x.re)} nhóm (${f1(100 * x.re / x.c.length)}%)` : '—']; }));
+  const t = T.get(NG.src), c = t.c;
+  // theo nhóm công việc NRM2: trung vị hệ số của các nhóm thuộc NRM2 đó (≥ 3 nhóm)
+  const byN = new Map();
+  for (const x of c) { if (!byN.has(x.nrm)) byN.set(x.nrm, []); byN.get(x.nrm).push(x.r); }
+  const nrmRows = [...byN].filter(([, a]) => a.length >= 3).map(([k, a]) => { a.sort((p, q) => p - q); return { k, v: qs(a, 0.5), lo: qs(a, 0.25), hi: qs(a, 0.75), n: a.length }; }).sort((a, b) => a.k.localeCompare(b.k, 'vi'));
+  // phân bố hệ số giữa các nhóm
+  const BIN = [[0, 0.5], [0.5, 0.7], [0.7, 0.85], [0.85, 0.95], [0.95, 1.05], [1.05, 1.15], [1.15, 1.3], [1.3, 1.5], [1.5, 2], [2, Infinity]];
+  const so2 = v => v.toLocaleString('vi-VN');
+  const hist = BIN.map(([a, b]) => { const n = c.filter(x => x.r >= a && x.r < b).length; const k = b === Infinity ? `≥ ${so2(a)}` : a === 0 ? `< ${so2(b)}` : `${so2(a)}–${so2(b)}`;
+    return { k, v: n, color: a >= 0.95 && b <= 1.05 ? 'var(--series-1)' : a < 1 ? 'var(--series-3)' : 'var(--series-2)', tip: `Hệ số ${k}: ${n} nhóm` }; });
+  const top = c.slice().sort((a, b) => NG.dir === 'cao' ? b.r - a.r : a.r - b.r).slice(0, 40);
+  const seg = (items, on, attr) => `<div class="seg small-seg">${items.map(([k, l]) => `<button ${attr}="${esc(k)}" class="${k === on ? 'on' : ''}">${esc(l)}</button>`).join('')}</div>`;
+  v.innerHTML = head('So sánh nguồn dữ liệu: Nội bộ / CTG / Đối thủ', intro, method) +
+    `<div class="kpis">${kpis}</div>` +
+    card('Các nguồn trong dữ liệu đang mở', 'Hệ số > 1: nguồn đắt hơn Nội bộ; < 1: rẻ hơn. "Rẻ hơn Nội bộ" = số nhóm có hệ số < 1.', bang, 'full') +
+    (K.so.length > 1 ? `<div class="ctrl">${seg(K.so.map(s => [s, s + ' so với Nội bộ']), NG.src, 'data-ngsrc')}</div>` : '') +
+    `<div class="grid2">${card(`${esc(NG.src)} so với Nội bộ theo nhóm công việc NRM2`, 'Thanh = trung vị hệ số các nhóm đại diện; vạch = P25–P75. Chỉ NRM2 có ≥ 3 nhóm so được.',
+      CH.hbar(nrmRows.map(r => ({ k: r.k, v: r.v, lo: r.lo, hi: r.hi, color: r.v >= 1 ? 'var(--series-2)' : 'var(--series-3)', tip: `${r.k}: ${heSo(r.v)} (P25–P75 ${heSo(r.lo)}–${heSo(r.hi)}) · ${r.n} nhóm` })),
+        { ref: 1, base: 1, L: 220, fmt: heSo, lfmt: heSo, maxLab: 34 }))}` +
+    card(`Phân bố hệ số ${esc(NG.src)} / Nội bộ giữa các nhóm`, 'Số nhóm đại diện theo hệ số. Cột xanh = gần bằng Nội bộ (lệch ≤ 5%).', CH.vbar(hist, { fmt: f0, labels: true })) + `</div>` +
+    `<div class="card full"><h3>Nhóm ${esc(NG.src)} lệch Nội bộ nhiều nhất</h3><div class="cap">Bấm "Điểm rơi" để xem phân bố giá từng nguồn của nhóm.</div>
+      <div class="ctrl">${seg([['cao', `${NG.src} cao hơn nhiều nhất`], ['thap', `${NG.src} thấp hơn nhiều nhất`]], NG.dir, 'data-ngdir')}</div>
+      ${table([{ t: 'Nhóm đại diện' }, { t: 'ĐV' }, { t: 'NRM2' }, { t: 'Nội bộ P50', num: 1 }, { t: `${esc(NG.src)} P50`, num: 1 }, { t: 'Hệ số', num: 1 }, { t: '' }],
+        top.map(x => [esc(x.name), esc(x.unit), esc(x.nrm), `${f0(x.mNb)} <span class="muted small">(${x.nNb})</span>`, `${f0(x.m)} <span class="muted small">(${x.n})</span>`, `<b>${heSo(x.r)}</b>`, `<button class="link" data-drop="${x.g}">Điểm rơi →</button>`]), 'tall')}</div>`;
+  v.onclick = e => {
+    const a = e.target.closest('[data-ngsrc]'); if (a) { NG.src = a.dataset.ngsrc; TABS.nguon(v); return; }
+    const d = e.target.closest('[data-ngdir]'); if (d) { NG.dir = d.dataset.ngdir; TABS.nguon(v); }
+  };
+};
+
 /* ---------- 6. Monte Carlo ---------- */
-const MC = { rows: null };
+const MC = { rows: null, src: '' };
 function erf(x) { const t = 1 / (1 + 0.3275911 * Math.abs(x)), y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return x >= 0 ? y : -y; }
 const Phi = x => 0.5 * (1 + erf(x / Math.SQRT2));
 function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
@@ -196,6 +308,10 @@ TABS.mc = v => {
   const combos = AN.combos, key = c => c.work + '|' + c.unit;
   const cmap = Object.fromEntries(combos.map(c => [key(c), c]));
   if (!MC.rows) MC.rows = AN.mcTemplate.items.map(i => ({ k: i.work + '|' + i.unit, qty: i.qty }));
+  // Nguồn đơn giá: phân phối riêng của nguồn nếu đủ dữ liệu, không thì dùng phân phối chung (đánh dấu *)
+  const srcNames = [...new Set(combos.flatMap(c => Object.keys(c.src || {})))];
+  const own = c => !MC.src || !!(c.src && c.src[MC.src]);
+  const qOf = c => (MC.src && c.src && c.src[MC.src]) ? c.src[MC.src].q : c.q;
   v.innerHTML = head('Mô phỏng Monte Carlo chi phí (giả sử áp dụng #8, #9, #46)', `Mỗi hạng mục lấy ngẫu nhiên đơn giá từ PHÂN PHỐI THẬT trong CSDL (đã quy về ${AN.baseYear}), nhân khối lượng, cộng tổng — lặp hàng nghìn lần → xác suất vượt ngân sách. Khối lượng mẫu là GIẢ ĐỊNH: "${esc(AN.mcTemplate.name)}" — sửa theo dự án của bạn.`,
     'Lấy mẫu nghịch đảo hàm phân phối thực nghiệm (41 phân vị, đã cắt P2/P98). Tương quan giá giữa các hạng mục mô phỏng bằng nhân tố chung (Gaussian copula, hệ số ρ). Tornado = mức dao động chi phí P10→P90 của từng hạng mục.', [8, 9, 46]) +
     `<div class="grid2"><div class="card"><h3>Khối lượng (giả định)</h3><div class="cap">Chọn loại công việc + đơn vị có trong CSDL (≥ 40 dòng). Đơn giá P10/P50/P90 tham khảo.</div>
@@ -203,6 +319,7 @@ TABS.mc = v => {
       <div class="ctrl" style="margin-top:10px"><button class="btn" id="mc-add">+ Thêm hạng mục</button><button class="btn" id="mc-reset">Khôi phục mẫu</button></div></div>
      <div class="card"><h3>Thiết lập</h3>
       <div class="ctrl"><label>Diện tích sàn (m²) <input type="number" id="mc-gfa" value="${AN.mcTemplate.gfa}" style="width:110px"></label><label>Số lần lặp <select id="mc-n"><option>2000</option><option selected>10000</option><option>30000</option></select></label></div>
+      ${srcNames.length > 1 ? `<div class="ctrl"><label>Nguồn đơn giá <select id="mc-src"><option value="">Tất cả (${srcNames.map(esc).join(' + ')})</option>${srcNames.map(s => `<option${s === MC.src ? ' selected' : ''}>${esc(s)}</option>`).join('')}</select></label><span class="small muted">* = nguồn này chưa đủ dữ liệu cho hạng mục → dùng phân phối chung</span></div>` : ''}
       <div class="ctrl"><label>Tương quan giá ρ <input type="range" id="mc-rho" min="0" max="0.9" step="0.1" value="0.3"> <b id="mc-rv">0,3</b></label></div>
       <div class="ctrl"><label>Ngân sách để kiểm tra (tỷ) <input type="number" id="mc-bud" step="0.5" style="width:100px"></label><button class="btn primary" id="mc-run">Chạy mô phỏng</button></div>
       <div class="note">ρ = 0: giá các hạng mục độc lập (lạc quan). ρ cao: thị trường cùng tăng/giảm (thép, xi măng…) → đuôi rủi ro dày hơn.</div>
@@ -212,8 +329,9 @@ TABS.mc = v => {
   const drawRows = () => {
     $('#mc-body').innerHTML = MC.rows.map((r, i) => {
       const c = cmap[r.k];
+      const q = qOf(c), star = own(c) ? '' : ' <span class="muted" title="Nguồn đã chọn chưa đủ dữ liệu — dùng phân phối chung">*</span>';
       return `<tr><td><select data-i="${i}" class="mc-k">${opts.replace(`value="${esc(r.k)}"`, `value="${esc(r.k)}" selected`)}</select></td>
-        <td class="num"><input type="number" data-i="${i}" class="mc-q" value="${r.qty}"></td><td class="num">${f0(qAt(c.q, .1))}</td><td class="num"><b>${f0(qAt(c.q, .5))}</b></td><td class="num">${f0(qAt(c.q, .9))}</td>
+        <td class="num"><input type="number" data-i="${i}" class="mc-q" value="${r.qty}"></td><td class="num">${f0(qAt(q, .1))}</td><td class="num"><b>${f0(qAt(q, .5))}</b>${star}</td><td class="num">${f0(qAt(q, .9))}</td>
         <td><button class="ghost" data-del="${i}" title="Bỏ">✕</button></td></tr>`;
     }).join('');
   };
@@ -223,10 +341,11 @@ TABS.mc = v => {
   $('#mc-add').onclick = () => { MC.rows.push({ k: key(combos[0]), qty: 100 }); drawRows(); };
   $('#mc-reset').onclick = () => { MC.rows = AN.mcTemplate.items.map(i => ({ k: i.work + '|' + i.unit, qty: i.qty })); drawRows(); };
   $('#mc-rho').oninput = e => $('#mc-rv').textContent = NF1.format(+e.target.value);
+  if ($('#mc-src')) $('#mc-src').onchange = e => { MC.src = e.target.value; drawRows(); run(); };
   $('#mc-run').onclick = run;
   function run() {
     const rho = +$('#mc-rho').value, n = +$('#mc-n').value, gfa = +$('#mc-gfa').value || 1;
-    const items = MC.rows.filter(r => cmap[r.k] && r.qty > 0).map(r => ({ ...r, c: cmap[r.k] }));
+    const items = MC.rows.filter(r => cmap[r.k] && r.qty > 0).map(r => ({ ...r, c: { ...cmap[r.k], q: qOf(cmap[r.k]) } }));
     const tot = new Float64Array(n), per = items.map(() => new Float64Array(n)), s1 = Math.sqrt(1 - rho * rho);
     for (let t = 0; t < n; t++) {
       const zc = gauss(); let sum = 0;
