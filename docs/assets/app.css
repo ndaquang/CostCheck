@@ -255,13 +255,14 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 .chart .muted { fill: var(--muted); }
 
-/* Chế độ đối thủ: nhấn nhẹ màu để không nhầm với dữ liệu nội bộ */
+/* Chế độ dữ liệu riêng của admin (đối thủ): nhấn nhẹ màu để không nhầm với dữ liệu nội bộ; chỉ tra cứu */
+.ds-sub [data-drop] { display: none !important; }
 .ds-doithu .logo { background: #b45309; }
-.ds-doithu [data-drop] { display: none !important; }
 .ds-doithu .topnav a.on { color: #b45309; background: #fdf0e1; }
-.ds-ctg .logo { background: #0f766e; }
-.ds-ctg [data-drop] { display: none !important; }
-.ds-ctg .topnav a.on { color: #0f766e; background: #e2f3ef; }
+/* Nguồn dữ liệu của dòng (CTG, đối thủ) trong dữ liệu nội bộ — cùng màu chuỗi với biểu đồ điểm rơi */
+.tag.src { background: color-mix(in srgb, var(--series-2) 16%, transparent); color: var(--series-2); font-weight: 600; }
+.tag.src.src-dt { background: color-mix(in srgb, var(--series-3) 16%, transparent); color: var(--series-3); }
+.dp-src { margin-top: 8px; }
 
 /* ===== Danh sách nhóm đại diện (Tra cứu) ===== */
 .glist-h, .grp-h {
@@ -300,6 +301,7 @@ details.adv[open] > summary::before { content: "− "; }
 .dp-head { display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; align-items: flex-end; margin-bottom: 14px; }
 .dp-name { font-size: 19px; font-weight: 700; }
 .dp-kpis { margin: 0; grid-template-columns: repeat(3, minmax(150px, auto)); }
+.dp-kpis.k4 { grid-template-columns: repeat(4, minmax(130px, auto)); }
 .small-v { font-size: 17px !important; }
 .small-seg { margin: 2px 0 6px; }
 .an-meta { padding: 6px 20px 0; max-width: 1320px; margin: 0 auto; }

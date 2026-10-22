@@ -424,14 +424,21 @@
   }
 
   /* ---------- Gộp nhiều nguồn giá vào một CSDL ---------- */
-  // Mỗi dòng mang nhãn nguồn (cột ns, từ điển D.ns: 'Nội bộ', 'Đối thủ', 'CTG', 'Bổ sung'…) để lọc và thống kê theo nguồn.
+  // Mỗi dòng mang nhãn nguồn ở cột ng (từ điển D.ng: 'Nội bộ', 'CTG', 'Đối thủ', 'Bổ sung'…) — cùng cột "Nguồn dữ liệu" mà
+  // 2_XU_LY ghi khi làm sạch chung Nội bộ + CTG — để lọc và thống kê theo nguồn. Chưa có cột thì tạo (mọi dòng = Nội bộ);
+  // dòng chưa ghi nguồn (-1) cũng là Nội bộ. -> chỉ số của label trong D.ng
   function tagSource(DB, label) {
     const C = DB.cols, D = DB.dicts = DB.dicts || {};
-    if (!D.ns) D.ns = [];
-    if (!C.ns) { if (!D.ns.length) D.ns.push('Nội bộ'); C.ns = new Array(DB.count).fill(0); }
-    let k = D.ns.indexOf(label);
-    if (k < 0) { D.ns.push(label); k = D.ns.length - 1; }
-    return k;
+    if (!Array.isArray(D.ng)) D.ng = [];
+    const idx = l => { let k = D.ng.indexOf(l); if (k < 0) { D.ng.push(l); k = D.ng.length - 1; } return k; };
+    if (!Array.isArray(C.ng)) C.ng = new Array(DB.count).fill(idx('Nội bộ'));
+    else if (C.ng.some(v => !(v >= 0))) { const nb = idx('Nội bộ'); for (let i = 0; i < C.ng.length; i++) if (!(C.ng[i] >= 0)) C.ng[i] = nb; }
+    return idx(label);
+  }
+  // CSDL đã có dòng của nguồn label chưa (vd CTG đã làm sạch chung trong khối db) — để không gộp một nguồn hai lần
+  function hasSource(DB, label) {
+    const C = DB.cols, D = DB.dicts || {}, k = Array.isArray(D.ng) ? D.ng.indexOf(label) : -1;
+    return k >= 0 && Array.isArray(C.ng) && C.ng.includes(k);
   }
   // Hệ số quy giá gốc về năm gốc theo năm báo giá, học từ chính CSDL: trung vị (giá đã quy về năm gốc / giá gốc) của
   // các dòng cùng năm. -> Map(năm → hệ số); rỗng nếu CSDL không có giá đã quy đổi (p26)
@@ -467,7 +474,7 @@
     };
     let quyDoi = 0, khongNam = 0;
     tagSource(dst, 'Nội bộ');
-    const ns = tagSource(dst, label);
+    const ng = tagSource(dst, label);
     const col = (cols, k) => Array.isArray(cols[k]);
     const gName = (cols, dicts, i) => col(cols, 'gn') && cols.gn[i] >= 0 && dicts.gn ? dicts.gn[cols.gn[i]] : col(cols, 'g') && cols.g[i] >= 0 && dicts.g ? dicts.g[cols.g[i]] : null;
     const uName = (cols, dicts, i) => col(cols, 'cu') && cols.cu[i] >= 0 && dicts.cu ? dicts.cu[cols.cu[i]] : col(cols, 'u') && cols.u[i] >= 0 && dicts.u ? dicts.u[cols.u[i]] : '';
@@ -510,7 +517,7 @@
       const [g, gn] = mapGroup(i);
       for (const k of keys) {
         let v;
-        if (k === 'ns') v = ns;
+        if (k === 'ng') v = ng;
         else if (k === 'p') v = col(SC, 'p') && SC.p[i] >= 0 ? pOff + SC.p[i] : -1;
         else if (k === 'g') v = g;
         else if (k === 'gn') v = gn;
@@ -528,7 +535,7 @@
     return { dong: M, nhomChung: chung, nhomMoi: moi, lechNam: !!(src.baseYear && dst.baseYear && src.baseYear !== dst.baseYear), quyDoi, khongNam };
   }
   // Dòng thuộc nguồn đang bị tắt (f.srcOff: Set nhãn nguồn) — lọc cứng, không bao giờ nới
-  const srcOff = (IX, i, f) => !!(f.srcOff && f.srcOff.size && IX.has('ns') && f.srcOff.has(IX.D.ns[IX.C.ns[i]]));
+  const srcOff = (IX, i, f) => !!(f.srcOff && f.srcOff.size && IX.has('ng') && f.srcOff.has(IX.D.ng[IX.C.ng[i]]));
 
   /* ---------- Thống kê giá nhóm theo bộ lọc ---------- */
   // f: { yearFrom, yearTo, types:Set, provs:Set, excludeReview, excludeOutlier, excludeWarn, srcOff:Set }
@@ -563,7 +570,7 @@
     const proj = new Set(), src = {};
     for (const i of ids) {
       if (has('p')) proj.add(C.p[i]);
-      if (has('ns')) { const l = IX.D.ns[C.ns[i]]; src[l] = (src[l] || 0) + 1; }
+      if (has('ng')) { const l = IX.D.ng[C.ng[i]]; src[l] = (src[l] || 0) + 1; }
       const y = C.y[i] || 0;
       if (y > latest || (y === latest && latestPrice === null)) { latest = y; }
       const t = C.tot[i];
@@ -828,5 +835,5 @@
     return { d, pct: baseline ? d / baseline : null, amt: isNum(qty) ? d * qty : null };
   }
 
-  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, tagSource, mergeDB, yearFactors, poolCands, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, diff, toNum, COLS, PROP_HEAD };
+  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, tagSource, hasSource, mergeDB, yearFactors, poolCands, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, diff, toNum, COLS, PROP_HEAD };
 });

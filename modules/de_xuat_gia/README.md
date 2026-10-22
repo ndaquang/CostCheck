@@ -1,6 +1,6 @@
 # Module Điền giá BOQ
 
-Module lấy **giá tốt nhất** từ mọi nguồn giá trong gói dữ liệu `.dgbw` (CSDL nội bộ dùng chung với app Tra cứu, đơn giá đối thủ, CTG nếu có) cùng đơn giá bổ sung, rồi ghi vào file BOQ. Mặc định giá nằm ở **một cột riêng "ĐƠN GIÁ ĐỀ XUẤT (CSDL)" được tô màu**, tách khỏi giá QS trong cột Đơn giá.
+Module lấy **giá tốt nhất** từ mọi nguồn giá trong gói dữ liệu `.dgbw` (Nội bộ, CTG, đối thủ — dùng chung với app Tra cứu) cùng đơn giá bổ sung, rồi ghi vào file BOQ. Mặc định giá nằm ở **một cột riêng "ĐƠN GIÁ ĐỀ XUẤT (CSDL)" được tô màu**, tách khỏi giá QS trong cột Đơn giá.
 
 ## Vị trí trong phần mềm
 Module là mục **"Điền giá BOQ"** trên thanh điều hướng của app Tra cứu đơn giá, cạnh Tra cứu / Điểm rơi giá / Phân tích. **Chỉ tài khoản admin thấy mục này.** Module dùng chung lần đăng nhập và CSDL đã nạp của app, không cần đăng nhập lại.
@@ -47,11 +47,12 @@ Giá đề xuất lấy từ mọi nguồn dưới đây, gộp chung vào phân
 | Nguồn | Lấy từ | Ghi chú |
 |---|---|---|
 | Nội bộ | khối `db` của gói `.dgbw` (dùng chung với app Tra cứu) | nguồn chính |
+| CTG | khối `db`: `2_XU_LY` làm sạch chung với Nội bộ, phân biệt bằng cột "Nguồn dữ liệu" (`ng`). Gói cũ: khối `ctg` tạo bằng `modules/ctg/dong_goi.js` | gói nhân viên đã lọc bỏ; khối `ctg` chỉ khóa admin mở được, giá được quy về năm gốc (xem dưới) |
 | Đối thủ | khối `doithu` của gói `.dgbw` (cùng dữ liệu mục "Đối thủ" của app) | chỉ khóa admin mở được |
-| CTG | khối `ctg` của gói `.dgbw` (CSDL chiết tính giá, mục "CTG" của app; tạo bằng `modules/ctg/dong_goi.js`) | chỉ khóa admin mở được; giá được quy về năm gốc (xem dưới) |
 | Bổ sung | file Excel nạp bằng **Nhập Excel đơn giá…** | ưu tiên nhẹ khi khớp |
 
-- Khi mở mục Điền giá BOQ, module tự mở các khối `doithu`, `ctg` bằng khóa của tài khoản đang đăng nhập. Khối nào không có trong gói (hoặc tài khoản không có quyền) thì bỏ qua và ghi rõ ở dòng **"Nguồn giá đang dùng"** ngay đầu module. Ví dụ: "nội bộ 12.345 · đối thủ 3.456 báo giá · CTG: không có trong gói dữ liệu".
+- Mọi dòng mang nhãn nguồn ở cột `ng` (từ điển `dicts.ng`: Nội bộ, CTG, Đối thủ, Bổ sung), cùng cột "Nguồn dữ liệu" mà `2_XU_LY` ghi cho Nội bộ + CTG.
+- Khi nạp dữ liệu, **app Tra cứu đã gộp đối thủ** (và khối `ctg` nếu khối `db` chưa có CTG) vào dữ liệu nội bộ bằng `mergeDB`. Vì vậy module nhận sẵn cả ba nguồn qua `window.DB`. Nguồn đã có trong CSDL thì module không gộp lần nữa. Nguồn chưa có, ví dụ khi chạy riêng trang `modules/de_xuat_gia/index.html`, thì module tự mở khối `ctg`, `doithu` bằng khóa của tài khoản đang đăng nhập. Khối nào không có trong gói (hoặc tài khoản không có quyền) thì bỏ qua và ghi rõ ở dòng **"Nguồn giá đang dùng"** ngay đầu module. Ví dụ: "Nội bộ 12.345 · CTG 2.000 · Đối thủ 3.456 báo giá".
 - Nhóm đại diện của nguồn khác **trùng tên + đơn vị** với nhóm nội bộ được gộp chung: báo giá hai nguồn vào cùng một phân bố, P25 tính trên tất cả. "Cùng đơn vị" là cùng đơn vị thật: nhóm "tấn" không gộp với nhóm "kg". Nhóm chỉ nguồn khác có thì thêm thành nhóm mới. Nhờ vậy dòng BOQ mà CSDL nội bộ chưa có vẫn có giá.
 - **CTG giữ giá gốc theo từng file** (không quy đổi theo năm), còn CSDL nội bộ đã quy về năm gốc. Khi gộp, giá CTG được quy về năm gốc theo **hệ số năm học từ chính CSDL nội bộ**: trung vị của (giá đã quy đổi / giá gốc) các báo giá nội bộ cùng năm. Năm sớm hơn mọi năm có hệ số dùng hệ số năm gần nhất; từ năm gốc trở đi giữ nguyên; dòng không rõ năm giữ giá gốc. Dòng "Nguồn giá đang dùng" ghi số dòng đã quy đổi.
 - **Gộp nhóm gần giống** (tùy chọn ở bước 3, bật mặc định): mỗi nguồn ghi tên khác nhau ("Bê tông lót M150" ở CTG, "Bê tông lót móng M150 đá 4x6" ở nội bộ), và ngay trong CSDL nội bộ cùng một công việc cũng có nhiều nhóm. Khi tính giá một dòng, các nhóm khớp gần ngang nhóm chính được gộp báo giá vào cùng phân bố, nếu thỏa đủ:
@@ -65,7 +66,12 @@ Giá đề xuất lấy từ mọi nguồn dưới đây, gộp chung vào phân
 - Ngăn chi tiết, báo cáo Excel (cột "Nguồn báo giá") ghi số báo giá theo từng nguồn, vd "12 báo giá (nội bộ 9, đối thủ 3)".
 - Gộp diễn ra trong bộ nhớ của module. CSDL của app Tra cứu và gói `.dgbw` không bị sửa.
 - Mỗi khối phải cùng định dạng `window.DB` của app (cols, dicts, projects), với giá đã quy về cùng năm gốc. Khối có năm gốc khác được ghi lưu ý; khối khác định dạng được báo "định dạng khác, chưa dùng được".
-- Công cụ `hoc/` và `demo/chay_file.js` nhận `--them data/doithu.js` (lặp được, có thể kèm `=Nhãn`) để train, soát dữ liệu và chạy thử trên cùng các nguồn với trang web. `lam_sach.js --sua` không dùng cùng `--them`, để bản CSDL sửa không trộn nguồn khác vào.
+- Công cụ `hoc/` và `demo/chay_file.js` dùng cùng các nguồn với trang web:
+  - `--du-lieu <thư mục data>`: đọc `db.js` + `doithu.js` (+ `ctg.js`), ví dụ `../3_WEB_OFFLINE/data`.
+  - `--goi <gói admin .dgbw> --user <admin>`: đọc thẳng các khối `db`, `doithu`, `ctg` của gói. Mật khẩu lấy từ biến môi trường `DGW_MAT_KHAU`, hoặc được hỏi khi chạy (không hiện ký tự). `chay_file.js` xóa dữ liệu đã giải mã khỏi thư mục kết quả khi chạy xong.
+  - `--them data/doithu.js` (lặp được, có thể kèm `=Nhãn`): thêm từng nguồn.
+
+  Nguồn đã có trong CSDL (CTG trong khối `db`) thì không gộp lần nữa. `lam_sach.js` ghi cột **Nguồn** cho từng dòng lỗi, và sheet Tóm tắt đếm số lỗi theo nguồn. `lam_sach.js --sua` chỉ soát và sửa CSDL chính (với `--du-lieu` / `--goi` là khối `db`), không dùng cùng `--them`, để bản CSDL sửa không trộn nguồn khác vào.
 
 ## Chọn giá "tốt nhất"
 | Tùy chọn | Ý nghĩa |
@@ -92,6 +98,7 @@ Phần mềm không dùng mô hình AI "hộp đen": khớp theo từ (IDF), t�
 **1. Làm sạch CSDL đơn giá** — lỗi dữ liệu vừa làm khớp sai vừa làm lệch P25/P50.
 ```
 node modules/de_xuat_gia/hoc/lam_sach.js --db data/db.js --out ket_qua_lam_sach [--sua db_sach.js] [--gan-nhom]
+node modules/de_xuat_gia/hoc/lam_sach.js --du-lieu ../3_WEB_OFFLINE/data --out ket_qua_lam_sach     # soát chung Nội bộ + CTG + Đối thủ
 ```
 Báo cáo `BAO_CAO_LAM_SACH.xlsx` liệt kê: giá không hợp lệ, dòng trùng hệt, ngoại lai chưa đánh dấu, đơn vị lạ, lệch đơn vị trong nhóm, nhóm phân tán lớn (đang gộp nhiều quy cách), nhóm trùng nhau, mô tả không rõ ("Tổng cộng" nhập nhầm), dòng chưa có nhóm (kèm nhóm gợi ý), dòng có thể sai nhóm. `--sua` ghi **bản CSDL mới** đã bỏ dòng trùng / giá 0 và đánh dấu ngoại lai (không xóa); `--gan-nhom` gán thêm nhóm cho dòng chưa có nhóm khi gợi ý rất chắc (≥ 0,85, cùng đơn vị). CSDL gốc không bị sửa. Các lỗi còn lại sửa trong dữ liệu nguồn của app Tra cứu rồi dựng lại gói `.dgbw`.
 

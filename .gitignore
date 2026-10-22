@@ -1,8 +1,27 @@
-__pycache__/
-modules/de_xuat_gia/demo/ket_qua/
-modules/de_xuat_gia/demo/ket_qua_*/
-modules/de_xuat_gia/hoc/ket_qua_*/
+# ── KHÔNG BAO GIỜ đưa lên GitHub: dữ liệu, gói mã hóa, khóa, mật khẩu ──
+goi_du_lieu/
 *.dgbw
 *.dgbw.tmp
 *.truoc_ctg
-DATABASE_CTG*.xlsx
+*.enc
+*.xlsx
+data/
+tai_khoan.json
+thong_tin.json
+cau_hinh*.json
+.env
+*.pem
+*.key
+*.pfx
+
+# ── Giữ trên máy admin, không cần trên GitHub ──
+tools/
+dist/
+__pycache__/
+*.pyc
+*.tmp
+
+# ── Kết quả chạy thử / công cụ học của module (tạo lại được) ──
+modules/de_xuat_gia/demo/ket_qua/
+modules/de_xuat_gia/demo/ket_qua_*/
+modules/de_xuat_gia/hoc/ket_qua_*/
