@@ -249,6 +249,7 @@
       if (S.items.length) S.session = sessionData();   // nạp lại BOQ: giữ lựa chọn, giá tay, ý kiến đã có
       const prev = new Map(S.sheets.filter(s => s.include).map(s => [s.name, s.det]));
       S.wb = wb; S.fileName = file.name; S.sheets = []; S.items = []; S.lines = [];
+      const skipped = [];   // sheet hiện (visible) nhưng không có hạng mục
       wb.sheets.forEach((sh, si) => {
         if (sh.state !== 'visible' || OWN.test(sh.name)) return;
         const grid = wb.grid(si);
@@ -258,12 +259,15 @@
         if (old) { delete det.cols.prop; if (fresh && fresh.cols.prop !== undefined) det.cols.prop = fresh.cols.prop; }
         // sheet chỉ có thuyết minh / điều kiện chung (không có dòng hạng mục) thì mặc định không dùng
         const nItem = det ? DXG.extractLines(grid, det, sh.name).filter(l => l.kind === 'item').length : 0;
-        S.sheets.push({ si, name: sh.name, grid, formulas: wb.formulaCells(si), det: det ? JSON.parse(JSON.stringify(det)) : { headerRow: 0, dataStart: 1, cols: {} }, include: nItem > 0, auto: !!det });
+        const entry = { si, name: sh.name, grid, formulas: wb.formulaCells(si), det: det ? JSON.parse(JSON.stringify(det)) : { headerRow: 0, dataStart: 1, cols: {} }, include: nItem > 0, auto: !!det };
+        // sheet không có dòng hạng mục (bìa, tổng hợp, mẫu trống…) không cần điền giá: bỏ khỏi danh sách; file xuất vẫn giữ nguyên sheet đó
+        (nItem ? S.sheets : skipped).push(entry);
       });
+      if (!S.sheets.length) S.sheets = skipped;   // không nhận ra sheet nào: hiện đủ để QS chọn sheet và cột thủ công
       $('#n-boq').textContent = file.name;
       const ok = S.sheets.filter(s => s.include).length;
       if (!S.sheets.length) throw new Error('File không có sheet nào để đọc.');
-      msg(ok ? `Đã đọc ${S.sheets.length} sheet, nhận diện được bảng BOQ ở ${ok} sheet. Kiểm tra lại cấu trúc ở bước 2 (Mô tả, Đơn vị, Khối lượng, Đơn giá).` : 'Không tự nhận ra dòng tiêu đề BOQ. Hãy chọn sheet và cột thủ công ở bước 2.', ok ? 'ok' : 'err');
+      msg(ok ? `Đã đọc file, nhận diện được bảng BOQ ở ${ok} sheet (bỏ qua ${skipped.length} sheet không có hạng mục cần điền giá). Kiểm tra lại cấu trúc ở bước 2 (Mô tả, Đơn vị, Khối lượng, Đơn giá).` : 'Không tự nhận ra dòng tiêu đề BOQ. Hãy chọn sheet và cột thủ công ở bước 2.', ok ? 'ok' : 'err');
       renderMap();
       $('#step-map').hidden = false; $('#step-res').hidden = true;
       $('#step-map').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -788,7 +792,7 @@
     if (det.cols.prop !== undefined) return { c: det.cols.prop, reuse: true };
     const last = Math.max(...items.map(it => it.r));
     let mx = Math.max(...Object.values(det.cols));
-    for (let r = det.headerRow; r <= last; r++) {
+    for (let r = det.headerRow; r < sh.grid.length; r++) {   // cả phần dưới dòng hạng mục cuối: ô lạc ở cột ngoài cũng không bị ghi đè hay lẫn vào cột đề xuất
       const row = sh.grid[r] || [];
       for (let c = row.length - 1; c > mx; c--) if (row[c] !== null && row[c] !== undefined && row[c] !== '') { mx = c; break; }
     }
