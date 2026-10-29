@@ -650,9 +650,9 @@
   /* ---------- Nhận diện bảng BOQ ---------- */
   const COLS = {
     code: ['stt', 'tt', 'no', 'item', 'item no', 'ma hieu', 'ma', 'ma cv', 'ma cong viec', 'ref', 'so tt', 'hang muc so'],
-    desc: ['mo ta', 'noi dung', 'ten cong viec', 'noi dung cong viec', 'hang muc', 'description', 'dien giai', 'cong viec', 'item description', 'ten hang muc', 'mo ta cong viec', 'description of works', 'particulars', 'ten vat tu'],
+    desc: ['mo ta', 'noi dung', 'ten cong viec', 'ten cong tac', 'noi dung cong viec', 'hang muc', 'description', 'dien giai', 'cong viec', 'item description', 'ten hang muc', 'mo ta cong viec', 'description of works', 'particulars', 'ten vat tu'],
     unit: ['don vi', 'dvt', 'dv', 'unit', 'units', 'don vi tinh', 'uom'],
-    qty: ['khoi luong', 'kl', 'so luong', 'quantity', 'qty', 'quantities', 'sl'],
+    qty: ['khoi luong', 'kl', 'q ty', 'so luong', 'quantity', 'qty', 'quantities', 'sl'],
     rate: ['don gia', 'unit rate', 'rate', 'unit price', 'don gia tong hop', 'don gia tong', 'don gia vnd', 'gia'],
     amount: ['thanh tien', 'amount', 'total', 'gia tri', 'thanh tien vnd', 'total amount', 'tong'],
     mat: ['vat lieu', 'vat tu', 'material', 'materials', 'don gia vat lieu', 'vl'],
@@ -707,6 +707,23 @@
       }
     }
     if (!best) return null;
+    // Tiêu đề nhóm 2 dòng: "ĐƠN GIÁ" / "THÀNH TIỀN" gộp ô bên trên, dòng dưới là Vật liệu | Nhân công | Máy | Tổng cộng.
+    // Đơn giá và thành tiền của dòng là cột "Tổng cộng" của nhóm, không phải cột Vật liệu hay cột "Tổng cộng" nào đó.
+    {
+      const hr = grid[best.headerRow] || [], sub = grid[best.headerRow + 1] || [];
+      const group = (re, key) => {
+        const c0 = hr.findIndex(v => typeof v === 'string' && re.test(norm(v)));
+        if (c0 < 0 || !/vat lieu|vat tu|material/.test(norm(sub[c0]))) return;
+        let c1 = c0 + 1; while (c1 < hr.length && (hr[c1] === null || hr[c1] === undefined || hr[c1] === '')) c1++;
+        for (let c = c0; c < c1; c++) {
+          const t = norm(sub[c]);
+          if (/^(tong( cong)?|total)$/.test(t)) best.cols[key] = c;
+          else if (key === 'rate' && /vat lieu|vat tu|material/.test(t)) best.cols.mat = c;
+          else if (key === 'rate' && /nhan cong|labou?r/.test(t)) best.cols.lab = c;
+        }
+      };
+      group(/^don gia\b/, 'rate'); group(/^thanh tien\b/, 'amount');
+    }
     // Cột trùng nhau: ưu tiên mô tả/đơn vị/khối lượng
     const used = new Set();
     for (const k of ['prop', 'desc', 'unit', 'qty', 'rate', 'amount', 'code', 'mat', 'lab', 'base', 'note']) {
