@@ -3,7 +3,7 @@
    • Nhận diện cột / dòng hạng mục của bảng BOQ.
    • Khớp từng dòng BOQ với "nhóm đại diện" trong cơ sở dữ liệu đơn giá (window.DB, cùng định dạng với app tra cứu).
    • Thống kê giá nhóm (trung vị, P25–P75…) theo bộ lọc, đề xuất đơn giá và độ tin cậy.
-   • Ghép giá baseline vào dòng BOQ và tính chênh lệch. */
+   • Ghép giá baseline vào dòng BOQ, tính chênh lệch và đánh giá baseline phù hợp / không phù hợp với CSDL. */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.DXG = factory();
@@ -852,5 +852,17 @@
     return { d, pct: baseline ? d / baseline : null, amt: isNum(qty) ? d * qty : null };
   }
 
-  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, tagSource, hasSource, mergeDB, yearFactors, poolCands, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, diff, toNum, COLS, PROP_HEAD };
+  // Đánh giá giá baseline so với phân bố giá CSDL (ref: {p10, p25, p50, p75, p90}):
+  // 'ok' phù hợp (trong P25–P75 hoặc lệch P50 ≤ tol) · 'xem' cần xem (trong P10–P90) · 'cao' / 'thap' không phù hợp (ngoài P10–P90)
+  function judgeBaseline(base, ref, tol = 0.10) {
+    if (!isNum(base) || base <= 0 || !ref || !isNum(ref.p50) || !(ref.p50 > 0)) return null;
+    const d50 = base / ref.p50 - 1;
+    let level;
+    if ((base >= ref.p25 && base <= ref.p75) || Math.abs(d50) <= tol) level = 'ok';
+    else if (base >= ref.p10 && base <= ref.p90) level = 'xem';
+    else level = base > ref.p90 ? 'cao' : 'thap';
+    return { level, d50, ok: level === 'ok' || level === 'xem' };
+  }
+
+  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, tagSource, hasSource, mergeDB, yearFactors, poolCands, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, judgeBaseline, diff, toNum, COLS, PROP_HEAD };
 });

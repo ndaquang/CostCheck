@@ -8,6 +8,7 @@
    5. Giá điền tay + lưu / khôi phục phiên.
    6. Dữ liệu học: lựa chọn nhóm của QS được lưu (.dxgl) và dùng lại khi khớp.
    7. Nhiều nguồn giá: đơn giá đối thủ + CTG gộp vào CSDL của module (nhóm trùng tên chung phân bố, CTG quy về năm gốc), lọc theo nguồn.
+   8. Baseline: đánh giá phù hợp / không phù hợp với CSDL; Giá điền "Baseline nếu phù hợp" điền baseline phù hợp, dòng không phù hợp dùng P25.
    Dùng: node tests/e2e.js <thư mục tạm>   (cần playwright, python3 + openpyxl, LibreOffice) */
 const fs = require('fs'), path = require('path'), http = require('http');
 const { execFileSync } = require('child_process');
@@ -202,6 +203,29 @@ print(json.dumps([[ws.cell(r,4).value, ws.cell(r,5).value, ws.cell(r,7).value] f
   await page.click('#o-src summary');
   const f7 = await exportFile('lan7_DaDienGia.xlsx');
   verify(path.join(WORK, 'BOQ_mau.xlsx'), f7);
+
+  console.log('8. Baseline: đánh giá phù hợp / không phù hợp với CSDL + phương án "Baseline nếu phù hợp"');
+  await page.setInputFiles('#f-base', path.join(WORK, 'Baseline_mau.xlsx'));
+  await page.waitForFunction(() => window.__DXG_STATE.items.some(it => it.baseFile));
+  const bl = () => page.evaluate(() => window.__DXG_STATE.items.map(it => ({ id: it.id, base: it.c.base, bv: it.c.bv && it.c.bv.level, fill: it.c.fill, price: it.c.price, p25: it.c.ref && it.c.ref.p25, why: it.c.why })));
+  let b = await bl();
+  const judged = b.filter(x => x.bv);
+  check(judged.length >= 4, `baseline được đánh giá với CSDL: ${judged.map(x => `${x.id} ${x.bv}`).join('; ')}`);
+  check(/không phù hợp/.test(await page.$eval('#load-msg', e => e.textContent)), 'thông báo nạp baseline có số dòng phù hợp / không phù hợp');
+  await page.selectOption('#o-pick', 'base');
+  b = await bl();
+  const okB = b.filter(x => x.bv === 'ok' || x.bv === 'xem'), koB = b.filter(x => x.bv === 'cao' || x.bv === 'thap');
+  check(okB.length > 0 && okB.every(x => x.fill && x.price === x.base && /^Baseline/.test(x.why)), `baseline phù hợp → điền baseline (${okB.length} dòng)`);
+  check(koB.every(x => x.fill && Math.abs(x.price - x.p25) / x.p25 < 0.01 && /không phù hợp — (cao|thấp) — dùng P25/.test(x.why)), `baseline không phù hợp → điền P25 CSDL (${koB.length} dòng)`);
+  check(b.filter(x => !x.base && x.fill).every(x => Math.abs(x.price - x.p25) / x.p25 < 0.01), 'dòng không có baseline → P25');
+  await page.click('#flt button[data-f="blko"]');
+  check(await page.$$eval('#res-tbl tbody tr[data-id]', r => r.length) === koB.length, 'lọc "Baseline không phù hợp"');
+  await page.click('#flt button[data-f="all"]');
+  const f8 = await exportFile('lan8_DaDienGia.xlsx');
+  verify(path.join(WORK, 'BOQ_mau.xlsx'), f8);
+  const col8 = colOf(f8, 'Xay dung', 9), okRow = okB.find(x => x.id.startsWith('Xay dung|'));
+  if (okRow) check(col8[+okRow.id.split('|')[1] + 1][0] === okRow.base, `cột đề xuất ghi baseline phù hợp (dòng ${okRow.id}: ${okRow.base})`);
+  await page.selectOption('#o-pick', 'p25');
 
   if (errs.length) { console.error('LỖI TRANG:', errs); fails++; }
   await browser.close(); srv.close();

@@ -80,6 +80,22 @@ Giá đề xuất lấy từ mọi nguồn dưới đây, gộp chung vào phân
 | Thấp nhất hợp lý (P10) | mức thấp nhất còn đáng tin |
 | Trung vị (P50) | mức phổ biến của thị trường |
 | Năm gần nhất | trung vị các báo giá của năm mới nhất |
+| Baseline nếu phù hợp với CSDL (không thì P25) | dòng có baseline **phù hợp / cần xem** điền đúng giá baseline; baseline **không phù hợp** hoặc không có baseline thì điền P25 |
+
+### Baseline: phù hợp / không phù hợp với CSDL
+Nạp **Nhập Excel baseline…** (hoặc cột "Giá baseline" trong BOQ, hoặc nhập tay trong ngăn chi tiết). Mỗi dòng có baseline được đối chiếu với phân bố giá CSDL của nhóm khớp (đã lọc, đã nhân hệ số):
+
+| Đánh giá | Điều kiện |
+|---|---|
+| **Phù hợp** | baseline trong P25–P75, hoặc lệch P50 không quá "Ngưỡng lệch baseline" (mặc định 10%) |
+| **Cần xem** | ngoài P25–P75 nhưng trong P10–P90 |
+| **Không phù hợp — cao / thấp** | trên P90 / dưới P10 |
+| Chưa đối chiếu được | nhóm khớp dưới mức "Chỉ điền khi khớp ≥", khác đơn vị, hoặc không có tham khảo |
+
+- Bảng kết quả: cột "so BL · đánh giá BL" có nhãn đánh giá; thẻ KPI **Baseline so với CSDL** đếm số dòng phù hợp / cần xem / không phù hợp; nút lọc **Baseline không phù hợp**.
+- Ngăn chi tiết ghi đánh giá kèm % lệch so P50; thanh phân bố đánh dấu vị trí BL.
+- Báo cáo Excel thêm cột Baseline, Nguồn baseline, Baseline so với CSDL, Baseline so P50, Giá điền so baseline; sheet Tóm tắt đếm theo đánh giá.
+- Với phương án "Baseline nếu phù hợp", dòng có baseline nhưng chưa đối chiếu được vẫn điền baseline, kèm lý do "chưa đối chiếu được với CSDL, nên kiểm tra".
 
 - "Báo giá đáng tin" là báo giá còn lại sau các bộ lọc: bỏ giá ngoại lai, bỏ dòng REVIEW, và lọc theo nguồn, năm, loại hình, tỉnh/TP nếu có chọn. Có hệ số điều chỉnh (%) và tùy chọn làm tròn.
 - **Chỉ điền khi đủ tin cậy:** nhóm tham khảo khớp từ mức "Trung bình" trở lên (chỉnh được) và cùng đơn vị (hoặc quy đổi được, vd kg ↔ tấn). Dòng không đạt được để trống, kèm lý do, để QS định giá.

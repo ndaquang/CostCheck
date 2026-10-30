@@ -20,13 +20,18 @@
   const FIT = { cao: 'Cao', tb: 'Trung bình', thap: 'Thấp', none: 'Không khớp' };
   const FIT_RANK = { cao: 3, tb: 2, thap: 1, none: 0 };
   const PROP_FILL = 'FFFFEB9C', PROP_HEAD_FILL = 'FFFFC000';   // màu tô cột giá đề xuất: ô giá / tiêu đề
-  const PICK_SHORT = { p25: 'P25', p10: 'P10', med: 'P50', latest: 'năm gần nhất' };
+  const PICK_SHORT = { p25: 'P25', p10: 'P10', med: 'P50', latest: 'năm gần nhất', base: 'baseline phù hợp / P25' };
   const PICK = {
     p25: { label: 'Tốt nhất — cạnh tranh (P25)', f: s => s.p25 },
     p10: { label: 'Thấp nhất hợp lý (P10)', f: s => s.p10 },
     med: { label: 'Trung vị thị trường (P50)', f: s => s.med },
     latest: { label: 'Năm gần nhất (trung vị)', f: s => s.latestPrice },
+    // Phương án baseline: dòng có baseline phù hợp với CSDL (trong P10–P90) điền baseline; baseline không phù hợp / không có baseline → P25
+    base: { label: 'Baseline nếu phù hợp với CSDL (không thì P25)', f: s => s.p25 },
   };
+  // Đánh giá giá baseline so với phân bố giá CSDL (DXG.judgeBaseline)
+  const BL_EVAL = { ok: 'Phù hợp', xem: 'Cần xem', cao: 'Không phù hợp — cao', thap: 'Không phù hợp — thấp' };
+  const BL_CLS = { ok: 'cao', xem: 'tb', cao: 'none', thap: 'none' };
   // Đánh giá giá QS đã có sẵn trong file (nếu có) so với phân bố giá CSDL
   const EVAL = { ok: 'Hợp lý', xem: 'Cần xem', bt: 'Bất thường', nogia: 'Chưa có giá', notk: 'Không có tham khảo', skip: 'Bỏ qua' };
   const KEYS = [['code', 'Mã/STT'], ['desc', 'Mô tả *'], ['unit', 'Đơn vị'], ['qty', 'Khối lượng'], ['rate', 'Đơn giá (giá QS có sẵn)'], ['amount', 'Thành tiền'], ['base', 'Giá baseline']];
@@ -296,7 +301,8 @@
       $('#n-base').textContent = `${file.name} · ${NF.format(list.length)} giá`;
       if (S.items.length) { applyBaseline(); recompute(); }
       const hit = S.items.filter(it => isNum(it.baseFile)).length;
-      msg(S.items.length ? `Baseline: đọc ${NF.format(list.length)} giá, ghép được ${NF.format(hit)}/${NF.format(S.items.length)} dòng BOQ.` : `Đã đọc ${NF.format(list.length)} giá baseline.`, 'ok');
+      const t = S.items.length ? totals(S.items) : null;
+      msg(t ? `Baseline: đọc ${NF.format(list.length)} giá, ghép được ${NF.format(hit)}/${NF.format(S.items.length)} dòng BOQ — so với CSDL: ${NF.format(t.blOk)} phù hợp, ${NF.format(t.blXem)} cần xem, ${NF.format(t.blKo)} không phù hợp. Chọn "Giá điền: ${PICK.base.label}" để điền baseline phù hợp vào BOQ.` : `Đã đọc ${NF.format(list.length)} giá baseline. Sau khi tính giá, mỗi dòng có đánh giá baseline phù hợp / không phù hợp với CSDL.`, 'ok');
     } catch (e) { console.error(e); msg('Không đọc được file baseline: ' + (e.message || e), 'err'); }
   }
   // Đơn giá bổ sung: thêm vào CSDL ngay trong phiên (không ghi ra gói dữ liệu)
@@ -523,6 +529,11 @@
     const ref = shown ? { p10: st.p10 * f, p25: st.p25 * f, p50: st.med * f, p75: st.p75 * f, p90: st.p90 * f } : null;
     // ---- Giá điền và có điền hay không
     const best = shown ? roundPrice(PICK[o.pick].f(st) * f) : null;
+    // ---- Baseline và đánh giá phù hợp / không phù hợp với CSDL (chỉ khi nhóm khớp đủ tin cậy và cùng đơn vị)
+    const base = isNum(it.baseManual) ? it.baseManual : isNum(it.baseFile) ? it.baseFile : it.baseCol;
+    const baseSrc = isNum(it.baseManual) ? 'nhập tay' : isNum(it.baseFile) ? 'file baseline' : isNum(it.baseCol) ? 'cột BOQ' : '';
+    const reliable = shown && c.unitOk !== false && (c.picked || FIT_RANK[fit.level] >= FIT_RANK[o.minFit]);
+    const bv = reliable ? DXG.judgeBaseline(base, ref, o.tolBl) : null;
     let price = null, fill = false, why = '';
     const hasRate = it.sh.det.cols.rate !== undefined, col = o.mode === 'col';
     // Cột riêng: giá đề xuất ghi vào cột mới, ô Đơn giá (kể cả ô đã có giá QS) không bị đụng tới
@@ -531,11 +542,13 @@
     else if (!col && it.rateFormula) why = 'Ô đơn giá là công thức — giữ nguyên';
     else if (!col && isNum(it.qs) && !o.overwrite) { why = 'Ô đã có giá — giữ nguyên'; price = it.qs; }
     else if (isNum(it.manual)) { price = it.manual; fill = true; why = 'Giá nhập tay'; }
+    else if (o.pick === 'base' && bv && bv.ok) { price = base; fill = true; why = bv.level === 'ok' ? 'Baseline — phù hợp với CSDL' : 'Baseline — cần xem (ngoài P25–P75, trong P10–P90)'; }
+    else if (o.pick === 'base' && isNum(base) && !reliable) { price = base; fill = true; why = 'Baseline — chưa đối chiếu được với CSDL, nên kiểm tra'; }
     else if (!shown) why = c && st && st.n === 0 ? 'Nhóm khớp không có báo giá thuộc nguồn đang chọn' : 'Không có tham khảo trong CSDL — QS tự định giá';
     else if (c.unitOk === false) why = `Khác đơn vị (CSDL: ${IX.groups[c.g].unit}) — không điền`;
     else if (FIT_RANK[fit.level] < FIT_RANK[o.minFit]) { why = `Khớp ${FIT[fit.level].toLowerCase()} — không điền, QS kiểm tra`; }
     else if (!isNum(best) || best <= 0) why = 'Không tính được giá';
-    else { price = best; fill = true; why = PICK[o.pick].label + (fit.level === 'cao' ? '' : ` · khớp ${FIT[fit.level].toLowerCase()}, nên kiểm tra`); }
+    else { price = best; fill = true; why = (o.pick === 'base' ? (bv ? `Baseline ${BL_EVAL[bv.level].toLowerCase()} — dùng P25 CSDL` : 'Không có baseline — dùng P25 CSDL') : PICK[o.pick].label) + (fit.level === 'cao' ? '' : ` · khớp ${FIT[fit.level].toLowerCase()}, nên kiểm tra`); }
     if (col) why = why.replace(/không điền/g, 'không đề xuất');
     // ---- Đánh giá giá đang có trong file (nếu QS đã nhập)
     const qs = it.qs, d50 = ref && isNum(qs) && ref.p50 ? qs / ref.p50 - 1 : null;
@@ -546,8 +559,6 @@
     else if ((qs >= ref.p25 && qs <= ref.p75) || Math.abs(d50) <= o.tolOk) ev = 'ok';
     else if ((qs < ref.p10 || qs > ref.p90) && Math.abs(d50) > o.tolBt) ev = 'bt';
     else ev = 'xem';
-    const base = isNum(it.baseManual) ? it.baseManual : isNum(it.baseFile) ? it.baseFile : it.baseCol;
-    const baseSrc = isNum(it.baseManual) ? 'nhập tay' : isNum(it.baseFile) ? 'file baseline' : isNum(it.baseCol) ? 'cột BOQ' : '';
     const finalPrice = isNum(price) ? price : null;
     const dev = DXG.diff(finalPrice, base, it.qty);
     const devHi = !!(dev && dev.pct !== null && Math.abs(dev.pct) > o.tolBl);
@@ -561,7 +572,7 @@
       if (o.mode === 'col' && isNum(it.qs)) notes.push(`Ô Đơn giá đang có ${fmt(it.qs)} — giữ nguyên`);
       if (c.learned && !c.picked) notes.push(c.learned === 'exact' ? 'Theo dữ liệu học (QS đã chọn nhóm này)' : 'Theo dữ liệu học (mô tả gần giống)');
     }
-    it.c = { cand: c, pool, shown, st, fit, ref, best, price: finalPrice, fill, why, qs, d50, ev, base, baseSrc, dev, devHi, notes,
+    it.c = { cand: c, pool, shown, st, fit, ref, best, price: finalPrice, fill, why, qs, d50, ev, base, baseSrc, bv, dev, devHi, notes,
       amt: isNum(finalPrice) && isNum(it.qty) ? finalPrice * it.qty : null, amtBase: isNum(base) && isNum(it.qty) ? base * it.qty : null };
     return it.c;
   }
@@ -576,7 +587,7 @@
 
   /* ---------- KPI ---------- */
   function totals(items) {
-    const t = { n: 0, fill: 0, keep: 0, none: 0, amt: 0, amtFill: 0, bt: 0, base: 0, withBase: 0, nBase: 0, devHi: 0 };
+    const t = { n: 0, fill: 0, keep: 0, none: 0, amt: 0, amtFill: 0, bt: 0, base: 0, withBase: 0, nBase: 0, devHi: 0, blOk: 0, blXem: 0, blKo: 0, blNa: 0 };
     for (const it of items) {
       const c = it.c; if (it.skip) continue;
       t.n++;
@@ -587,6 +598,8 @@
       if (isNum(c.qs) && c.ev === 'bt') t.bt++;
       if (isNum(c.amt) && isNum(c.amtBase)) { t.withBase += c.amt; t.base += c.amtBase; t.nBase++; }
       if (c.devHi) t.devHi++;
+      if (c.bv) { if (c.bv.level === 'ok') t.blOk++; else if (c.bv.level === 'xem') t.blXem++; else t.blKo++; }
+      else if (isNum(c.base)) t.blNa++;
     }
     return t;
   }
@@ -599,6 +612,7 @@
       [col ? 'Không đề xuất — QS định giá' : 'Không điền — QS định giá', NF.format(t.none), 'không có tham khảo hoặc khớp chưa đủ tin cậy', 'none'],
       col ? ['Tổng giá trị theo giá đề xuất', fmt(t.amt), 'KL × giá đề xuất (chỉ các dòng có đề xuất)', '']
         : ['Tổng giá trị sau khi điền', fmt(t.amt), `trong đó phần điền mới ${fmt(t.amtFill)}`, ''],
+      ['Baseline so với CSDL', t.blOk + t.blXem + t.blKo ? `${NF.format(t.blKo)} không phù hợp` : '—', t.blOk + t.blXem + t.blKo + t.blNa ? `${NF.format(t.blOk)} phù hợp · ${NF.format(t.blXem)} cần xem${t.blNa ? ` · ${NF.format(t.blNa)} chưa đối chiếu được` : ''}` : (S.baseName ? 'chưa ghép được dòng nào' : 'chưa nạp baseline'), 'blko'],
       ['So với baseline', dB === null ? '—' : pct(dB), dB === null ? (S.baseName ? 'chưa ghép được dòng nào' : 'chưa nạp baseline') : `${NF.format(t.nBase)} dòng · ${NF.format(t.devHi)} dòng lệch > ${Math.round(S.opt.tolBl * 100)}%`, 'dev'],
     ].map(([k, v, s, f]) => `<div class="kpi${f ? ' clickable' : ''}" ${f ? `data-f="${f}"` : ''}><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="s">${esc(s)}</div></div>`).join('');
   }
@@ -612,6 +626,7 @@
       if (['fill', 'keep', 'none'].includes(f) && status(c) !== f) return false;
       if (f === 'bt' && !(isNum(c.qs) && c.ev === 'bt')) return false;
       if (f === 'dev' && !c.devHi) return false;
+      if (f === 'blko' && !(c.bv && !c.bv.ok)) return false;
       if (f === 'note' && !it.note) return false;
       if (nq && !DXG.norm(it.desc + ' ' + it.code + ' ' + it.ctx).includes(nq)) return false;
       return true;
@@ -623,6 +638,7 @@
   const ST_BADGE_COL = { fill: ['cao', 'Có đề xuất'], keep: ['tb', 'Chỉ có giá QS'], none: ['man', 'Không đề xuất'] };
   const stBadge = it => { const [cls, t] = (S.opt.mode === 'col' ? ST_BADGE_COL : ST_BADGE)[status(it.c)]; return `<span class="badge b-${cls}" title="${esc(it.c.why)}">${t}</span>`; };
   const fitBadge = it => it.c.cand ? `<span class="badge b-${it.c.fit.level}" title="Độ phù hợp của nhóm CSDL với mô tả BOQ">${it.c.cand.picked ? 'QS chọn' : FIT[it.c.fit.level]}</span>` : '';
+  const blBadge = c => c.bv ? `<div><span class="badge b-${BL_CLS[c.bv.level]}" title="Baseline so với phân bố giá CSDL: ${esc(pct(c.bv.d50))} so P50">${esc(BL_EVAL[c.bv.level])}</span></div>` : '';
   function rowHtml(l) {
     if (l.kind === 'sheet') return `<tr class="head"><td colspan="11">Sheet: ${esc(l.sheet)}</td></tr>`;
     if (l.kind === 'head') return `<tr class="head"><td>${esc(l.code)}</td><td colspan="10">${esc(l.desc)}</td></tr>`;
@@ -641,12 +657,12 @@
       <td>${stBadge(l)}<div class="price-sub">${esc(c.why)}</div></td>
       <td class="num">${fmt(c.amt)}</td>
       <td class="num">${fmt(c.base)}${c.baseSrc ? `<div class="price-sub">${esc(c.baseSrc)}</div>` : ''}</td>
-      <td class="num ${c.devHi ? 'd-hi' : c.dev ? 'd-ok' : ''}">${c.dev ? pct(c.dev.pct) : ''}</td></tr>`;
+      <td class="num ${c.devHi ? 'd-hi' : c.dev ? 'd-ok' : ''}">${c.dev ? pct(c.dev.pct) : ''}${blBadge(c)}</td></tr>`;
   }
   function renderTable() {
     const rows = visible(), items = rows.filter(l => l.kind === 'item').length;
     $('#res-tbl').innerHTML = `<thead><tr><th>Mã</th><th>Mô tả</th><th>ĐV</th><th class="num">KL</th><th>Nhóm tham khảo trong CSDL</th>
-      <th class="num">P25 – P75</th><th class="num">${S.opt.mode === 'col' ? 'Giá đề xuất' : 'Đơn giá'}</th><th>${S.opt.mode === 'col' ? 'Đề xuất' : 'Điền'}</th><th class="num">Thành tiền</th><th class="num">Baseline</th><th class="num">so BL</th></tr></thead>
+      <th class="num">P25 – P75</th><th class="num">${S.opt.mode === 'col' ? 'Giá đề xuất' : 'Đơn giá'}</th><th>${S.opt.mode === 'col' ? 'Đề xuất' : 'Điền'}</th><th class="num">Thành tiền</th><th class="num">Baseline</th><th class="num">so BL · đánh giá BL</th></tr></thead>
       <tbody>${rows.slice(0, S.view.shown).map(rowHtml).join('')}</tbody>`;
     $('#flt-count').textContent = `${NF.format(items)} dòng`;
     $('#more').hidden = rows.length <= S.view.shown;
@@ -690,7 +706,8 @@
     const kv = [['Mô tả', esc(it.desc)], ['Hạng mục cha', esc(it.ctx)], ['Đơn vị / KL', `${esc(it.unit)} · ${fmtQ(it.qty)}`],
       ['Đơn giá', `<b>${fmt(c.price)}</b> ${stBadge(it)} <span class="muted small">${esc(c.why)}</span>`],
       ['Giá đang có trong ô', isNum(it.qs) ? `${fmt(it.qs)}${c.ref ? ` · ${EVAL[c.ev]} (${pct(c.d50)} so với P50)` : ''}` : it.rateFormula ? 'ô là công thức' : '<span class="muted">trống</span>'],
-      ['Baseline', isNum(c.base) ? `${fmt(c.base)} <span class="muted small">(${esc(c.baseSrc)})</span>${c.dev ? ` · lệch <span class="${c.devHi ? 'd-hi' : 'd-ok'}">${pct(c.dev.pct)}</span>` : ''}` : '—'],
+      ['Baseline', isNum(c.base) ? `${fmt(c.base)} <span class="muted small">(${esc(c.baseSrc)})</span>${c.dev ? ` · giá điền lệch <span class="${c.devHi ? 'd-hi' : 'd-ok'}">${pct(c.dev.pct)}</span>` : ''}` : '—'],
+      ['Baseline so với CSDL', c.bv ? `<span class="badge b-${BL_CLS[c.bv.level]}">${esc(BL_EVAL[c.bv.level])}</span> <span class="muted small">${pct(c.bv.d50)} so với P50 · phù hợp: trong P25–P75 hoặc lệch P50 ≤ ${Math.round(o.tolBl * 100)}%; không phù hợp: ngoài P10–P90</span>` : isNum(c.base) ? '<span class="muted">chưa đối chiếu được (không có nhóm CSDL khớp đủ tin cậy, cùng đơn vị)</span>' : '—'],
       ['Lưu ý dữ liệu', c.notes.length ? `<span class="warn">${esc(c.notes.join(' · '))}</span>` : '—']];
     let h = `<div class="row-in" style="justify-content:space-between;margin-bottom:10px"><button class="btn sm" data-do="prev">← Dòng trước</button><button class="btn sm" data-do="next">Dòng sau →</button></div>
       <div class="kv">${kv.map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('')}</div>
@@ -871,16 +888,18 @@
       ['File BOQ', S.fileName], ['Ghi giá vào', col ? `Cột riêng "${DXG.PROP_HEAD}" tô màu (cột Đơn giá giữ nguyên)` : 'Ô Đơn giá đang trống'], ['Cách chọn giá', PICK[o.pick].label], ['Đơn giá bổ sung', S.extra.length ? `${S.extra.length} giá` : 'không'],
       ['Dòng hạng mục', t.n], ['Sẽ điền / đã điền', t.fill], ['Giữ giá có sẵn', t.keep], ['Để trống — QS định giá', t.none],
       ['Tổng giá trị sau khi điền', Math.round(t.amt)], ['  trong đó phần điền mới', Math.round(t.amtFill)],
+      ['Baseline phù hợp CSDL', t.blOk], ['Baseline cần xem', t.blXem], ['Baseline không phù hợp CSDL', t.blKo], ['Baseline chưa đối chiếu được', t.blNa],
       ['CSDL', `${NF.format(DBX.count)} đơn giá · giá quy về ${DBX.baseYear || 2026} · cập nhật ${DBX.built || ''}`], ['Lập lúc', new Date().toLocaleString('vi-VN', { hour12: false })]];
-    const det = [['Sheet', 'Dòng', 'Mã', 'Mô tả', 'Tiêu đề gần nhất', 'ĐV', 'KL', 'Nhóm tham khảo CSDL', 'Độ phù hợp', 'Số BG', 'P10', 'P25', 'P50', 'P75', 'P90', col ? 'Giá đề xuất' : 'Đơn giá', 'Thành tiền', 'Trạng thái', 'Lý do', 'Ghi chú', 'Giá có sẵn trong BOQ', 'Nguồn báo giá']];
+    const det = [['Sheet', 'Dòng', 'Mã', 'Mô tả', 'Tiêu đề gần nhất', 'ĐV', 'KL', 'Nhóm tham khảo CSDL', 'Độ phù hợp', 'Số BG', 'P10', 'P25', 'P50', 'P75', 'P90', col ? 'Giá đề xuất' : 'Đơn giá', 'Thành tiền', 'Trạng thái', 'Lý do', 'Ghi chú', 'Giá có sẵn trong BOQ', 'Nguồn báo giá', 'Baseline', 'Nguồn baseline', 'Baseline so với CSDL', 'Baseline so P50', 'Giá điền so baseline']];
     for (const it of S.items) {
       const c = it.c, g = c.shown ? IX.groups[c.cand.g] : null, R = c.ref;
       det.push([it.sheet, it.r + 1, it.code, it.desc, it.heads[it.heads.length - 1] || '', it.unit, it.qty, g ? g.name : '', c.cand ? FIT_T[c.fit.level] : '', g ? c.st.n : null,
-        ...(R ? [R.p10, R.p25, R.p50, R.p75, R.p90].map(Math.round) : [null, null, null, null, null]), c.price, isNum(c.amt) ? Math.round(c.amt) : null, st(c), c.why, it.note, c.qs, g ? Object.entries(c.st.src || {}).map(([l, n]) => `${l} ${n}`).join(', ') : '']);
+        ...(R ? [R.p10, R.p25, R.p50, R.p75, R.p90].map(Math.round) : [null, null, null, null, null]), c.price, isNum(c.amt) ? Math.round(c.amt) : null, st(c), c.why, it.note, c.qs, g ? Object.entries(c.st.src || {}).map(([l, n]) => `${l} ${n}`).join(', ') : '',
+        isNum(c.base) ? c.base : null, c.baseSrc, c.bv ? BL_EVAL[c.bv.level] : isNum(c.base) ? 'Chưa đối chiếu được' : '', c.bv ? pct(c.bv.d50) : '', c.dev && c.dev.pct !== null ? pct(c.dev.pct) : '']);
     }
     const blob = window.writeWorkbook([
       { name: 'Tóm tắt', rows: sum, widths: [32, 70], nums: new Set([1]) },
-      { name: 'Chi tiết', rows: det, widths: [14, 6, 6, 48, 30, 7, 10, 38, 11, 7, 11, 11, 11, 11, 11, 12, 15, 20, 38, 30, 14, 26], nums: new Set([10, 11, 12, 13, 14, 15, 16, 20]) },
+      { name: 'Chi tiết', rows: det, widths: [14, 6, 6, 48, 30, 7, 10, 38, 11, 7, 11, 11, 11, 11, 11, 12, 15, 20, 38, 30, 14, 26, 14, 14, 22, 12, 14], nums: new Set([10, 11, 12, 13, 14, 15, 16, 20, 22]) },
     ]);
     download(blob, S.fileName.replace(/\.(xlsx|xlsm)$/i, '') + '_BaoCaoDienGia.xlsx');
   }

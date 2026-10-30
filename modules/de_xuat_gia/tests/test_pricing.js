@@ -263,4 +263,16 @@ t('gộp nhóm gần giống khi tính giá: cùng thông số thì gộp, khác
   // trong nhà / ngoài nhà là hai từ khác nhau sau chuẩn hóa
   assert.ok(DXG.tokens('Sơn tường trong nhà').includes('noithat') && DXG.tokens('Trát ngoài 2cm').includes('ngoaithat'));
 });
+t('đánh giá baseline so với CSDL: phù hợp / cần xem / không phù hợp', () => {
+  const ref = { p10: 80, p25: 90, p50: 100, p75: 110, p90: 130 };
+  assert.strictEqual(DXG.judgeBaseline(95, ref).level, 'ok');
+  assert.strictEqual(DXG.judgeBaseline(86, ref, 0.15).level, 'ok');   // ngoài P25–P75 nhưng lệch P50 trong ngưỡng
+  assert.strictEqual(DXG.judgeBaseline(120, ref).level, 'xem');
+  assert.strictEqual(DXG.judgeBaseline(120, ref).ok, true);
+  const cao = DXG.judgeBaseline(150, ref), thap = DXG.judgeBaseline(60, ref);
+  assert.strictEqual(cao.level, 'cao'); assert.strictEqual(cao.ok, false); assert.ok(Math.abs(cao.d50 - 0.5) < 1e-9);
+  assert.strictEqual(thap.level, 'thap'); assert.strictEqual(thap.ok, false);
+  assert.strictEqual(DXG.judgeBaseline(null, ref), null);
+  assert.strictEqual(DXG.judgeBaseline(100, null), null);
+});
 console.log(`\n${n} nhóm kiểm thử đạt.`);
