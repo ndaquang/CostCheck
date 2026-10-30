@@ -82,6 +82,33 @@ Giá đề xuất lấy từ mọi nguồn dưới đây, gộp chung vào phân
 | Năm gần nhất | trung vị các báo giá của năm mới nhất |
 | Baseline nếu phù hợp với CSDL (không thì P25) | dòng có baseline **phù hợp / cần xem** điền đúng giá baseline; baseline **không phù hợp** hoặc không có baseline thì điền P25 |
 
+## Kiểm tra chất lượng BOQ đã có giá
+
+Nạp BOQ **đã có giá** (của nhà thầu, tư vấn, hoặc BOQ nội bộ cần soát) bằng **Nhập Excel BOQ…** → **Tính giá điền**. Khi ≥ 50% số dòng đã có đơn giá, trang mở thẳng thẻ **Kiểm tra BOQ**. Không ghi gì vào file BOQ.
+
+**1. Sai số học và lỗi lập bảng**
+
+| Mức | Kiểm tra |
+|---|---|
+| Lỗi | Thành tiền ≠ Khối lượng × Đơn giá (sai số cho phép 0,1% hoặc 1 đ). Bảng tách Đơn giá thành Vật liệu / Nhân công mà không có cột tổng: đơn giá = VL + NC |
+| Lỗi | Dòng tổng ("Cộng hạng mục…", "Tổng cộng") lệch so với tổng các dòng phía trên: so với tổng từ dòng tổng trước, tổng của hạng mục cấp 1, tổng cả sheet, tổng các dòng cộng con. Dòng thuế / VAT / dự phòng / chiết khấu không kiểm tra |
+| Lỗi | Công thức Thành tiền lấy số liệu dòng khác (vd ô G7 = D6*E6) |
+| Lỗi | Khối lượng hoặc đơn giá âm |
+| Cảnh báo | Có KL và đơn giá nhưng thiếu thành tiền; có thành tiền nhưng thiếu đơn giá; có giá nhưng thiếu KL |
+| Lưu ý | Chưa có đơn giá; thành tiền nhập số cứng trong khi các dòng khác dùng công thức; dòng có thể trùng (cùng mô tả, đơn vị, KL) |
+
+Giá trị của ô công thức được đọc từ giá trị Excel lưu sẵn trong file (file lưu bằng Excel luôn có).
+
+**2. Giá so với thị trường (CSDL)**: đơn giá từng dòng được so với phân bố báo giá của nhóm khớp, theo các bộ lọc ở bước 3 (năm báo giá, loại hình, tỉnh, nguồn), giá quy về năm gốc của CSDL:
+- **Phù hợp**: trong P25–P75, hoặc lệch P50 ≤ "Ngưỡng lệch baseline".
+- **Cần xem**: trong P10–P90.
+- **Cao quá / Thấp quá**: trên P90 / dưới P10. Kèm chênh lệch tiền = (đơn giá − P50) × KL.
+- Chỉ đối chiếu dòng khớp nhóm từ mức "Chỉ điền khi khớp ≥" và cùng đơn vị. Dòng khác ghi "chưa đối chiếu được"; QS có thể chọn nhóm cho dòng đó trong ngăn chi tiết.
+
+**3. Đánh giá chung**: **Tốt** khi không có lỗi số học và ≤ 10% dòng có giá bất thường; **Kém — cần soát lại** khi lỗi số học > 5% số dòng hoặc > 30% dòng có giá bất thường; còn lại **Cần chỉnh sửa**.
+
+Thẻ Kiểm tra BOQ có bảng giá cao / thấp quá (xếp theo chênh lệch tiền) và bảng sai số học; bấm một dòng để mở ngăn chi tiết. Thẻ Chi tiết dòng có bộ lọc **Sai số học** và **Giá cao / thấp quá**. **Xuất báo cáo Excel** thêm sheet *Kiểm tra số học*, *Kiểm tra giá* và phần đánh giá chung trong sheet *Tóm tắt*.
+
 ### Baseline: phù hợp / không phù hợp với CSDL
 Nạp **Nhập Excel baseline…** (hoặc cột "Giá baseline" trong BOQ, hoặc nhập tay trong ngăn chi tiết). Mỗi dòng có baseline được đối chiếu với phân bố giá CSDL của nhóm khớp (đã lọc, đã nhân hệ số):
 

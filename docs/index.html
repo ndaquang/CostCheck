@@ -11,7 +11,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="stylesheet" href="shared/gate.css">
 <link rel="stylesheet" href="shared/secure-ui.css">
-<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v=0e17566b"><!--/DXG-->
+<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v=336bd2f1"><!--/DXG-->
 </head>
 <body>
 <div id="splash">
@@ -155,7 +155,7 @@
         <input type="file" id="f-boq" accept=".xlsx,.xlsm">
         <b>File BOQ cần điền giá</b>
         <span class="btn primary pick">Nhập Excel BOQ…</span>
-        <span class="muted small">Kéo thả hoặc bấm để chọn (.xlsx, .xlsm). Ô đơn giá đã có giá được giữ nguyên.</span>
+        <span class="muted small">BOQ chưa có giá để điền, hoặc <b>BOQ đã có giá để kiểm tra</b>: sai số học, giá cao / thấp so với thị trường (CSDL). Kéo thả hoặc bấm để chọn (.xlsx, .xlsm).</span>
         <span class="fname" id="n-boq"></span>
       </label>
       <label class="drop" id="drop-extra">
@@ -213,10 +213,11 @@
     <div class="tabs">
       <button class="tab on" data-tab="lines">Chi tiết dòng</button>
       <button class="tab" data-tab="sum">Tổng hợp</button>
+      <button class="tab" data-tab="audit">Kiểm tra BOQ</button>
       <div class="spacer"></div>
       <button class="btn" id="save-sess" title="Lưu nhóm đã chọn, giá tay, đơn giá bổ sung để làm tiếp sau">Lưu phiên</button>
       <button class="btn" id="save-learn" title="Lưu các lần QS chọn nhóm (cộng dồn với dữ liệu học đã nạp) để lần sau khớp đúng ngay">Lưu dữ liệu học</button>
-      <button class="btn" id="dx-report" title="Báo cáo từng dòng: giá điền, P10–P90, lý do — file Excel riêng, không ghi vào BOQ">Xuất báo cáo Excel</button>
+      <button class="btn" id="dx-report" title="Báo cáo từng dòng: giá điền, P10–P90, lý do, kiểm tra số học và giá — file Excel riêng, không ghi vào BOQ">Xuất báo cáo Excel</button>
       <button class="btn primary" id="dx-export" title="Ghi giá đề xuất vào file BOQ (mặc định: cột riêng tô màu, không đụng cột Đơn giá) và tải về">Xuất Excel đã điền giá</button>
     </div>
 
@@ -230,6 +231,8 @@
           <button data-f="bt">Giá có sẵn bất thường</button>
           <button data-f="dev">Lệch baseline</button>
           <button data-f="blko">Baseline không phù hợp</button>
+          <button data-f="arith">Sai số học</button>
+          <button data-f="pvko">Giá cao / thấp quá</button>
           <button data-f="note">Có ghi chú</button>
         </div>
         <input id="flt-q" type="search" placeholder="Lọc theo mô tả / mã…">
@@ -239,6 +242,7 @@
       <div class="more" id="more" hidden><button class="btn">Xem thêm</button></div>
     </div>
     <div id="tab-sum" hidden></div>
+    <div id="tab-audit" hidden></div>
   </section>
 </main>
 <aside id="dxg-drawer" hidden>
@@ -246,6 +250,6 @@
   <div id="dw-body"></div>
 </aside></template><!--/DXG-->
 <script src="shared/crypto-web.js"></script>
-<script src="shared/secure.js" data-build="admin" data-scripts="shared/secure-ui.js,assets/xlsx-lite.js?v=10,assets/charts.js?v=10,assets/dash.js?v=10,assets/dxg/pricing.js?v=0e17566b,assets/app.js?v=10,assets/dxg/xlsx-io.js?v=0e17566b,assets/dxg/dxg-app.js?v=0e17566b"></script>
+<script src="shared/secure.js" data-build="admin" data-scripts="shared/secure-ui.js,assets/xlsx-lite.js?v=10,assets/charts.js?v=10,assets/dash.js?v=10,assets/dxg/pricing.js?v=336bd2f1,assets/app.js?v=10,assets/dxg/xlsx-io.js?v=336bd2f1,assets/dxg/dxg-app.js?v=336bd2f1"></script>
 </body>
 </html>

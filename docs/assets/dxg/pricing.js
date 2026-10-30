@@ -771,7 +771,7 @@
       // Dòng tổng / thuế / chuyển trang (chú ý: "CÔNG TÁC…" không phải "CỘNG", "TỔNG QUÁT" không phải dòng tổng)
       const SUM = /^(tong (cong|gia tri|so tien|tien|muc|hang muc|chi phi)|cong( \d+| hang muc| muc| don| chuyen trang)?$|cong (hang muc|muc|don|chuyen trang)\b|total|sub ?total|grand total|thue( vat| gtgt)?\b|vat\b|carried forward|brought forward|chuyen (sang )?trang|mang sang)/;
       if (SUM.test(nd) && !unit) {
-        out.push({ kind: 'sum', r, desc, code, sheet: sheetName });
+        out.push({ kind: 'sum', r, desc, code, sheet: sheetName, amount: toNum(cell(r, 'amount')) });
         continue;
       }
       // Ghi chú / thuyết minh: chữ "Ghi chú" ở cột đơn vị, đoạn văn dài, dòng "......" → không phải hạng mục hay tiêu đề
@@ -784,7 +784,7 @@
         const ctx = heads.map(h => h.text).join(' · ');
         out.push({
           kind: 'item', r, sheet: sheetName, code, desc, unit, qty,
-          rate: toNum(cell(r, 'rate')), amount: toNum(cell(r, 'amount')), base: toNum(cell(r, 'base')),
+          rate: toNum(cell(r, 'rate')), amount: toNum(cell(r, 'amount')), base: toNum(cell(r, 'base')), lab: toNum(cell(r, 'lab')),
           ctx, heads: heads.map(h => h.text),
         });
       } else {
@@ -864,5 +864,70 @@
     return { level, d50, ok: level === 'ok' || level === 'xem' };
   }
 
-  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, tagSource, hasSource, mergeDB, yearFactors, poolCands, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, judgeBaseline, diff, toNum, COLS, PROP_HEAD };
+  const judgePrice = judgeBaseline;   // cùng thang đánh giá cho giá QS / giá trong BOQ cần kiểm tra
+
+  /* ---------- Kiểm tra số học BOQ đã có giá ---------- */
+  // lines: kết quả extractLines (nhiều sheet nối tiếp), mỗi dòng có thể kèm fAmt (công thức ô Thành tiền, không có '=')
+  // và rateEff (đơn giá dùng để tính: Đơn giá, hoặc VL + NC khi bảng tách 2 cột mà không có cột tổng).
+  // Trả về [{ sheet, r, kind, type, sev: 'loi' | 'canh_bao' | 'luu_y', msg, expect, actual, diff }]
+  const SEV_TYPES = { sai_tt: 'loi', sai_tong: 'loi', cong_thuc: 'loi', am: 'loi', thieu_tt: 'canh_bao', thieu_dg: 'canh_bao', thieu_kl: 'canh_bao', chua_gia: 'luu_y', nhap_cung: 'luu_y', trung: 'luu_y' };
+  function auditBoq(lines, opt = {}) {
+    const relTol = opt.relTol ?? 0.001, out = [];
+    const tolOf = v => Math.max(1, Math.abs(v) * relTol);
+    const near = (a, b) => Math.abs(a - b) <= tolOf(b);
+    const add = (l, type, msg, extra = {}) => out.push({ sheet: l.sheet, r: l.r, kind: l.kind, type, sev: SEV_TYPES[type], msg, ...extra });
+    const SKIP_SUM = /thue|vat\b|gtgt|chuyen (sang )?trang|carried|brought|mang sang|du phong|contingency|chiet khau|giam gia|discount/;
+    const bySheet = new Map();
+    for (const l of lines) { if (!bySheet.has(l.sheet)) bySheet.set(l.sheet, []); bySheet.get(l.sheet).push(l); }
+    for (const [, ls] of bySheet) {
+      const items = ls.filter(l => l.kind === 'item');
+      const nForm = items.filter(l => l.fAmt).length;
+      let sinceSum = 0, section = 0, all = 0, sumOfSums = 0, lastSum = null, extraSince = 0;
+      const seen = new Map();
+      for (const l of ls) {
+        if (l.kind === 'head') { if (l.lvl === 1) section = 0; continue; }
+        if (l.kind === 'item') {
+          const q = l.qty, rt = isNum(l.rateEff) ? l.rateEff : l.rate, a = l.amount;
+          const hasQ = isNum(q) && q !== 0, hasR = isNum(rt) && rt !== 0, hasA = isNum(a) && a !== 0;
+          if ((isNum(q) && q < 0) || (isNum(rt) && rt < 0)) add(l, 'am', 'Khối lượng hoặc đơn giá âm');
+          if (hasQ && hasR && hasA) {
+            const cands = [q * rt]; if (isNum(l.rate) && isNum(l.lab) && l.rateEff !== l.rate) cands.push(q * l.rate);
+            if (!cands.some(v => near(a, v))) add(l, 'sai_tt', 'Thành tiền ≠ Khối lượng × Đơn giá', { expect: q * rt, actual: a, diff: a - q * rt });
+          } else if (hasQ && hasR && !hasA && !l.fAmt) add(l, 'thieu_tt', 'Có khối lượng và đơn giá nhưng thiếu thành tiền', { expect: q * rt });
+          else if (hasA && !hasR) add(l, 'thieu_dg', 'Có thành tiền nhưng thiếu đơn giá', { actual: a });
+          else if ((hasR || hasA) && !hasQ) add(l, 'thieu_kl', 'Có giá nhưng thiếu khối lượng', { actual: a });
+          else if (hasQ && !hasR && !hasA) add(l, 'chua_gia', 'Chưa có đơn giá');
+          // công thức Thành tiền phải lấy số liệu của chính dòng đó
+          if (l.fAmt && !l.fAmt.includes('!')) {
+            const rows = [...l.fAmt.replace(/"[^"]*"/g, '').matchAll(/\$?[A-Z]{1,3}\$?(\d+)/g)].map(m => +m[1]);
+            const other = [...new Set(rows.filter(x => x !== l.r + 1))];
+            if (rows.length && other.length) add(l, 'cong_thuc', `Công thức thành tiền =${l.fAmt} lấy số liệu dòng ${other.join(', ')} (không phải dòng ${l.r + 1})`);
+          }
+          if (!l.fAmt && hasA && nForm >= Math.max(3, items.length * 0.5)) add(l, 'nhap_cung', 'Thành tiền nhập số cứng trong khi các dòng khác dùng công thức');
+          if (hasQ && l.desc.length > 10) {
+            const k = norm(l.desc) + '|' + norm(l.unit) + '|' + q;
+            if (seen.has(k)) add(l, 'trung', `Có thể trùng với dòng ${seen.get(k) + 1} (cùng mô tả, đơn vị, khối lượng)`); else seen.set(k, l.r);
+          }
+          const v = hasA ? a : hasQ && hasR ? q * rt : 0;
+          sinceSum += v; section += v; all += v;
+          continue;
+        }
+        if (l.kind !== 'sum') continue;
+        const a = l.amount, nd = norm(l.desc);
+        if (SKIP_SUM.test(nd)) { if (isNum(a)) extraSince += a; continue; }
+        if (!isNum(a)) continue;
+        const cands = [sinceSum, section, all, sumOfSums].filter(v => v !== 0);
+        if (lastSum !== null) cands.push(lastSum + extraSince);
+        if (cands.length && !cands.some(v => near(a, v))) {
+          const exp = cands.reduce((b, v) => Math.abs(v - a) < Math.abs(b - a) ? v : b);
+          add(l, 'sai_tong', `Dòng "${l.desc}" lệch so với tổng các dòng phía trên`, { expect: exp, actual: a, diff: a - exp });
+        }
+        if (near(a, sinceSum) || near(a, section)) sumOfSums += a;
+        lastSum = a; sinceSum = 0; extraSince = 0;
+      }
+    }
+    return out;
+  }
+
+  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, tagSource, hasSource, mergeDB, yearFactors, poolCands, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, judgeBaseline, judgePrice, auditBoq, diff, toNum, COLS, PROP_HEAD };
 });

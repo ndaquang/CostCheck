@@ -275,4 +275,36 @@ t('đánh giá baseline so với CSDL: phù hợp / cần xem / không phù hợ
   assert.strictEqual(DXG.judgeBaseline(null, ref), null);
   assert.strictEqual(DXG.judgeBaseline(100, null), null);
 });
+t('kiểm tra số học BOQ đã có giá', () => {
+  const it = (r, desc, unit, qty, rate, amount, extra = {}) => ({ kind: 'item', sheet: 'S', r, desc, unit, qty, rate, amount, ...extra });
+  const lines = [
+    { kind: 'head', sheet: 'S', r: 4, desc: 'PHẦN MÓNG', lvl: 1 },
+    it(5, 'Đào đất hố móng bằng máy', 'm3', 350, 46000, 16100000),
+    it(6, 'Bê tông móng M300 đá 1x2', 'm3', 120, 1700000, 240000000),                    // sai: đúng 204.000.000
+    it(7, 'Ván khuôn móng gỗ', 'm2', 410, 120000, null, { fAmt: 'D9*E9' }),              // công thức lấy dòng khác
+    it(8, 'Cốt thép móng', 'kg', 1000, 20000, 30000000, { lab: 5000, rateEff: 25000 }),   // VL 20.000 + NC 5.000: đúng ra 25.000.000
+    { kind: 'sum', sheet: 'S', r: 9, desc: 'Cộng hạng mục A', amount: 16100000 + 240000000 + 410 * 120000 + 30000000 },
+    { kind: 'head', sheet: 'S', r: 10, desc: 'PHẦN HOÀN THIỆN', lvl: 1 },
+    it(11, 'Trát tường trong nhà dày 15mm', 'm2', 1600, 100000, 160000000),
+    it(12, 'Sơn tường trong nhà', 'm2', 1600, null, null),                                // chưa có giá
+    it(13, 'Lát gạch nền', 'm2', null, 300000, 9000000),                                  // thiếu KL
+    { kind: 'sum', sheet: 'S', r: 14, desc: 'Cộng hạng mục B', amount: 169000000 },
+    { kind: 'sum', sheet: 'S', r: 15, desc: 'Thuế VAT 8%', amount: 1 },
+    { kind: 'sum', sheet: 'S', r: 16, desc: 'Tổng cộng', amount: 500000000 },            // sai
+  ];
+  const res = DXG.auditBoq(lines), at = (r, type) => res.find(x => x.r === r && x.type === type);
+  assert.ok(!res.some(x => x.r === 5), JSON.stringify(res.filter(x => x.r === 5)));
+  assert.strictEqual(at(6, 'sai_tt').diff, 36000000);
+  assert.ok(at(7, 'cong_thuc') && /dòng 9/.test(at(7, 'cong_thuc').msg));
+  assert.strictEqual(at(8, 'sai_tt').expect, 25000000);
+  assert.ok(!res.some(x => x.r === 9), 'cộng hạng mục A đúng');
+  assert.ok(at(12, 'chua_gia') && at(13, 'thieu_kl'));
+  assert.ok(!res.some(x => x.r === 14 || x.r === 15), 'cộng B đúng, dòng thuế bỏ qua');
+  const tong = at(16, 'sai_tong');
+  assert.ok(tong && tong.sev === 'loi' && tong.expect === 16100000 + 240000000 + 410 * 120000 + 30000000 + 169000000, JSON.stringify(tong));
+  // giá BOQ so với thị trường
+  const ref = { p10: 80, p25: 90, p50: 100, p75: 110, p90: 130 };
+  assert.strictEqual(DXG.judgePrice(200, ref).level, 'cao');
+  assert.strictEqual(DXG.judgePrice(50, ref).level, 'thap');
+});
 console.log(`\n${n} nhóm kiểm thử đạt.`);

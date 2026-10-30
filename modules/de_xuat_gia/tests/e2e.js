@@ -8,6 +8,7 @@
    5. Giá điền tay + lưu / khôi phục phiên.
    6. Dữ liệu học: lựa chọn nhóm của QS được lưu (.dxgl) và dùng lại khi khớp.
    7. Nhiều nguồn giá: đơn giá đối thủ + CTG gộp vào CSDL của module (nhóm trùng tên chung phân bố, CTG quy về năm gốc), lọc theo nguồn.
+   9. Kiểm tra BOQ đã có giá: sai số học (thành tiền, dòng tổng, công thức lấy nhầm dòng, thiếu giá) và giá cao / thấp so với CSDL.
    8. Baseline: đánh giá phù hợp / không phù hợp với CSDL; Giá điền "Baseline nếu phù hợp" điền baseline phù hợp, dòng không phù hợp dùng P25.
    Dùng: node tests/e2e.js <thư mục tạm>   (cần playwright, python3 + openpyxl, LibreOffice) */
 const fs = require('fs'), path = require('path'), http = require('http');
@@ -226,6 +227,22 @@ print(json.dumps([[ws.cell(r,4).value, ws.cell(r,5).value, ws.cell(r,7).value] f
   const col8 = colOf(f8, 'Xay dung', 9), okRow = okB.find(x => x.id.startsWith('Xay dung|'));
   if (okRow) check(col8[+okRow.id.split('|')[1] + 1][0] === okRow.base, `cột đề xuất ghi baseline phù hợp (dòng ${okRow.id}: ${okRow.base})`);
   await page.selectOption('#o-pick', 'p25');
+
+  console.log('9. Kiểm tra BOQ đã có giá: sai số học + giá cao / thấp so với thị trường');
+  await run(path.join(WORK, 'BOQ_KiemTra.xlsx'));
+  check(await page.$eval('#tab-audit', e => !e.hidden), 'BOQ đã có giá: tự mở thẻ Kiểm tra BOQ');
+  const au = await page.evaluate(() => window.__DXG_STATE.audit.map(x => `${x.r + 1}:${x.type}`));
+  for (const k of ['6:sai_tt', '7:cong_thuc', '12:chua_gia', '14:sai_tong']) check(au.includes(k), `phát hiện ${k}`);
+  check(!au.some(k => /^(4|5|8|10|11|13):/.test(k)), 'không báo nhầm dòng đúng: ' + au.join(', '));
+  const pv = await page.evaluate(() => Object.fromEntries(window.__DXG_STATE.items.map(it => [it.r + 1, it.c.pv && it.c.pv.level])));
+  check(pv[5] === 'cao' && pv[7] === 'thap' && pv[4] === 'ok', 'giá cao quá / thấp quá / phù hợp: ' + JSON.stringify(pv));
+  const txt = await page.$eval('#tab-audit', e => e.textContent);
+  check(/Đánh giá chung/.test(txt) && /Kém|Cần chỉnh sửa/.test(txt) && /Cao quá/.test(txt) && /Thấp quá/.test(txt), 'thẻ Kiểm tra BOQ có đánh giá chung, danh sách giá cao / thấp');
+  await page.screenshot({ path: path.join(WORK, 'audit.png'), fullPage: true });
+  await page.click('.tab[data-tab="lines"]');
+  await page.click('#flt button[data-f="arith"]');
+  check(await page.$$eval('#res-tbl tbody tr[data-id]', r => r.length) === 2, 'lọc "Sai số học": 2 dòng hạng mục (sai thành tiền, sai công thức)');
+  await page.click('#flt button[data-f="all"]');
 
   if (errs.length) { console.error('LỖI TRANG:', errs); fails++; }
   await browser.close(); srv.close();
