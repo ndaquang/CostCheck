@@ -18,7 +18,9 @@ Hai bản chỉ chứa MÃ. Không sao chép 3_WEB_OFFLINE/data và không sao c
 Dùng: python build.py              dựng app tra cứu + ghép module
       python build.py --module     chỉ ghép lại module vào bản đã dựng (không cần thư mục 3_WEB_OFFLINE)
 """
+import base64
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -30,7 +32,7 @@ WEB = os.path.normpath(os.path.join(HERE, "..", "3_WEB_OFFLINE"))
 SHARED = os.path.join(HERE, "shared")
 DOCS = os.path.join(HERE, "docs")
 NHAN_VIEN = os.path.join(HERE, "dist", "nhan_vien")
-SHARED_FILES = ["crypto-web.js", "secure.js", "secure-ui.js", "secure-ui.css", "gate.css"]
+SHARED_FILES = ["crypto-web.js", "dong-bo.js", "secure.js", "secure-ui.js", "secure-ui.css", "gate.css"]
 DXG = os.path.join(HERE, "modules", "de_xuat_gia")
 DXG_JS = ["pricing.js", "xlsx-io.js", "dxg-app.js"]
 # Mặc định chỉ admin — đúng chính sách "nhân viên chỉ tra cứu, không xuất". Bản nhân viên không chứa module.
@@ -40,6 +42,46 @@ DXG_CHO_NHAN_VIEN = False
 # nên dữ liệu đã giải mã trong trang không gửi đi đâu được ngay cả khi có mã độc chèn vào.
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
        "connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'")
+
+
+
+def doc_supabase():
+    """Đọc supabase.json (URL + khóa publishable, công khai theo thiết kế). Không có file thì bản dựng không đồng bộ, CSP vẫn 'none'.
+    Từ chối khóa bí mật: khóa trong bản web là công khai, nên service_role / sb_secret_ lọt vào đây là lộ toàn bộ CSDL."""
+    p = os.path.join(HERE, "supabase.json")
+    if not os.path.isfile(p):
+        return None
+    j = json.load(open(p, encoding="utf-8"))
+    url, key = str(j.get("url", "")).rstrip("/"), str(j.get("key", ""))
+    if not re.fullmatch(r"https://[a-z0-9-]+\.supabase\.co", url):
+        sys.exit("DỪNG: supabase.json: url phải dạng https://<project>.supabase.co")
+    if key.startswith("sb_secret_"):
+        sys.exit("DỪNG: supabase.json chứa khóa BÍ MẬT (sb_secret_). Chỉ được dùng khóa publishable hoặc anon.")
+    if key.startswith("eyJ"):
+        try:
+            seg = key.split(".")[1]
+            vai_tro = json.loads(base64.urlsafe_b64decode(seg + "=" * (-len(seg) % 4))).get("role")
+        except Exception:
+            sys.exit("DỪNG: supabase.json: khóa JWT không đọc được")
+        if vai_tro != "anon":
+            sys.exit(f"DỪNG: supabase.json chứa khóa có role={vai_tro}. Chỉ được dùng khóa anon / publishable.")
+    elif not key.startswith("sb_publishable_"):
+        sys.exit("DỪNG: supabase.json: khóa phải là sb_publishable_... hoặc JWT anon")
+    return url, key
+
+
+def gan_dong_bo(html):
+    """Mở connect-src đúng domain Supabase, nạp dong-bo.js và ghi URL/khóa publishable vào thẻ secure.js (chạy lại nhiều lần được)."""
+    sb = doc_supabase()
+    html = re.sub(r"connect-src [^;\"]+", f"connect-src {sb[0]}" if sb else "connect-src 'none'", html, count=1)
+    html = re.sub(r'<script src="[^"]*dong-bo\.js"></script>\r?\n?', "", html)
+    html = re.sub(r' data-sb-url="[^"]*" data-sb-key="[^"]*"', "", html)
+    if sb:
+        nl = "\r\n" if "\r\n" in html else "\n"
+        html = re.sub(r'(<script src="([^"]*)crypto-web\.js"></script>)', lambda m: f'{m.group(1)}{nl}<script src="{m.group(2)}dong-bo.js"></script>', html, count=1)
+        html = re.sub(r'(<script src="[^"]*secure\.js" data-build="[^"]*")', lambda m: f'{m.group(1)} data-sb-url="{sb[0]}" data-sb-key="{sb[1]}"', html, count=1)
+    return html
+
 
 CAM_TEN = re.compile(r"(^db\.js$|^doithu\.js$|^analysis\.js$|^ctg\.js$|\.dgbw$|\.enc$|\.xlsx$|^tai_khoan\.json$|^thong_tin\.json$)", re.I)
 CAM_NOI_DUNG = re.compile(r"window\.(DB|AN|DT|CTG)\s*=\s*\{")
@@ -89,7 +131,7 @@ def gan_cong_bao_ve(src, vai_tro, goc_shared):
     danh_sach = ",".join([f"{goc_shared}/secure-ui.js"] + dung_scripts)
     body = (f'<script src="{goc_shared}/crypto-web.js"></script>\n'
             f'<script src="{goc_shared}/secure.js" data-build="{vai_tro}" data-scripts="{danh_sach}"></script>\n')
-    return out.replace("</body>", body + "</body>", 1)
+    return gan_dong_bo(out.replace("</body>", body + "</body>", 1))
 
 
 def kiem_tra_web():
@@ -203,8 +245,10 @@ def main():
                 print(f"Bỏ qua {thu_muc}: chưa có bản dựng app tra cứu (chạy python build.py đầy đủ trước).")
                 continue
             html = open(idx, encoding="utf-8", newline="").read()
+            for f in SHARED_FILES:
+                shutil.copy2(os.path.join(SHARED, f), os.path.join(thu_muc, "shared", f))
             with open(idx, "w", encoding="utf-8", newline="") as fh:
-                fh.write(gan_dien_gia(html, thu_muc, vai_tro))
+                fh.write(gan_dong_bo(gan_dien_gia(html, thu_muc, vai_tro)))
             kiem_tra_dau_ra(thu_muc)
             print(f"✓ Ghép module Điền giá BOQ → {thu_muc}")
         return

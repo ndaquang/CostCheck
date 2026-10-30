@@ -135,6 +135,31 @@ Tham số `--thu-muc` và `--nguon` có giá trị mặc định, thường khô
 - **Repo public:** mã nguồn công khai, không có bí mật nên không sao. **Repo private:** GitHub Pages cần gói trả phí.
 - **Chưa kiểm thử** việc mở `index.html` trực tiếp từ đĩa (`file://`) trên máy nhân viên. Đã kiểm thử đầy đủ qua `http://localhost` với CSP nghiêm ngặt. Cần thử trên máy nhân viên trước khi triển khai.
 
+## 5b. Đồng bộ qua Supabase (gói gốc + delta)
+
+Tùy chọn. Không có `supabase.json` thì bản dựng không gọi mạng và CSP giữ `connect-src 'none'`.
+
+**Cách hoạt động.** Gói `.dgbw` gốc nằm trong bucket private `goi`. Mỗi thao tác ghi một dòng vào bảng `delta`, đã mã hóa ở trình duyệt bằng khóa dữ liệu của gói (AES-256-GCM, AAD gắn khối và phiên bản). Supabase chỉ thấy bản mã. Khi mở app: tải gói, tải delta đúng phiên bản, giải mã, áp lên dữ liệu. Mất mạng hoặc chưa có tài khoản Supabase thì app vẫn chạy bằng file gói chọn tay.
+
+**Thiết lập một lần**
+1. Schema, bucket và RLS đã nằm trong migration `dgbw_delta_va_bucket_goi`. Vai trò đọc từ `app_metadata.vai_tro` (`admin` hoặc `nhan_vien`), người dùng không tự sửa được.
+2. Supabase → Authentication → **tắt Allow new users to sign up**. Trang admin nằm công khai trên GitHub Pages nên không được để ai tự đăng ký.
+3. Tạo tài khoản: chạy `node scripts/mat_khau_dong_bo.js <tên đăng nhập> <admin|nhan_vien>` (hỏi mật khẩu app, không hiện ký tự). Script in email `<tên>@dgbw.local`, mật khẩu Supabase riêng và câu SQL đặt vai trò. Trong Authentication → Users chọn Add user (Auto Confirm) với email và mật khẩu đó, rồi chạy câu SQL. Mật khẩu Supabase là `PBKDF2-SHA256(mật khẩu app, muối "dgbw-dong-bo|<tên>", 600.000 vòng)`, nên Supabase không thấy mật khẩu app. Đổi mật khẩu app thì tạo lại tài khoản Supabase.
+4. `supabase.json` chứa URL và khóa **publishable** (công khai theo thiết kế). `build.py` từ chối khóa bí mật (`sb_secret_`, `service_role`).
+
+**Mỗi lần phát hành gói mới**
+1. Tải `admin/moi_nhat.dgbw` và `nhan_vien/moi_nhat.dgbw` lên bucket `goi`.
+2. Ghi `goi/phien_ban.json`: `{"phien_ban": "2026-11-01", "sha256": {"admin": "<sha256 file admin>", "nhan_vien": "<sha256 file nhân viên>"}}`. App so SHA-256 của gói đang mở với manifest, **chỉ áp delta khi khớp**. Gói cũ chạy như trước, không áp delta và không cho ghi.
+3. Delta của phiên bản cũ nằm yên trong bảng (lọc theo `goi`). Dọn khi cần: `delete from delta where goi <> '<phien_ban mới>'`.
+
+**Ghi delta (chỉ admin).** `SECURE.ghiDelta('db', { admin: op, nhan_vien: opDaLamSach })`. Op hiện có: `{ t: 'them', hang: [{ name, u, p: [mã, tên, loại, tỉnh, …], y, cp, tot, … }] }`. `opDaLamSach` cho nhân viên phải bỏ tên dự án, nhà thầu, nguồn trước khi gọi. `SECURE.dongBo()` trả `ket_noi | ngoai_tuyen | goi_cu | delta_hong`.
+
+**Giới hạn**
+- Chỉ có thao tác **thêm dòng**. Dòng mới chưa có nhóm (`g = -1`), chưa chấm ngoại lai, cho tới khi admin chạy lại làm sạch và phát hành gói mới.
+- Chưa có thao tác sửa / xóa và chưa cache delta khi mất mạng.
+- Chưa có nơi nào trong giao diện gọi `ghiDelta`: hàm đã sẵn, cần nối vào đúng thao tác của bạn.
+- Kiểm thử: `node tests/test_dong_bo.js` và `node tests/e2e_dong_bo.js` (Supabase giả lập).
+
 ## 6. Kiểm tra nhanh
 
 - `python -m py_compile tools/quan_tri_web.py build.py`
