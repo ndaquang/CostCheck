@@ -20,13 +20,20 @@
   const FIT = { cao: 'Cao', tb: 'Trung bình', thap: 'Thấp', none: 'Không khớp' };
   const FIT_RANK = { cao: 3, tb: 2, thap: 1, none: 0 };
   const PROP_FILL = 'FFFFEB9C', PROP_HEAD_FILL = 'FFFFC000';   // màu tô cột giá đề xuất: ô giá / tiêu đề
-  const PICK_SHORT = { p25: 'P25', p10: 'P10', med: 'P50', latest: 'năm gần nhất' };
+  const PICK_SHORT = { p25: 'P25', p10: 'P10', med: 'P50', latest: 'năm gần nhất', base: 'baseline phù hợp / P25' };
   const PICK = {
     p25: { label: 'Tốt nhất — cạnh tranh (P25)', f: s => s.p25 },
     p10: { label: 'Thấp nhất hợp lý (P10)', f: s => s.p10 },
     med: { label: 'Trung vị thị trường (P50)', f: s => s.med },
     latest: { label: 'Năm gần nhất (trung vị)', f: s => s.latestPrice },
+    // Phương án baseline: dòng có baseline phù hợp với CSDL (trong P10–P90) điền baseline; baseline không phù hợp / không có baseline → P25
+    base: { label: 'Baseline nếu phù hợp với CSDL (không thì P25)', f: s => s.p25 },
   };
+  // Đánh giá giá baseline so với phân bố giá CSDL (DXG.judgeBaseline)
+  const BL_EVAL = { ok: 'Phù hợp', xem: 'Cần xem', cao: 'Không phù hợp — cao', thap: 'Không phù hợp — thấp' };
+  const BL_CLS = { ok: 'cao', xem: 'tb', cao: 'none', thap: 'none' };
+  const PV_EVAL = { ok: 'Phù hợp', xem: 'Cần xem', cao: 'Cao quá', thap: 'Thấp quá' }, PV_CLS = BL_CLS;
+  const SEV = { loi: 'Lỗi', canh_bao: 'Cảnh báo', luu_y: 'Lưu ý' };
   // Đánh giá giá QS đã có sẵn trong file (nếu có) so với phân bố giá CSDL
   const EVAL = { ok: 'Hợp lý', xem: 'Cần xem', bt: 'Bất thường', nogia: 'Chưa có giá', notk: 'Không có tham khảo', skip: 'Bỏ qua' };
   const KEYS = [['code', 'Mã/STT'], ['desc', 'Mô tả *'], ['unit', 'Đơn vị'], ['qty', 'Khối lượng'], ['rate', 'Đơn giá (giá QS có sẵn)'], ['amount', 'Thành tiền'], ['base', 'Giá baseline']];
@@ -259,7 +266,7 @@
         if (old) { delete det.cols.prop; if (fresh && fresh.cols.prop !== undefined) det.cols.prop = fresh.cols.prop; }
         // sheet chỉ có thuyết minh / điều kiện chung (không có dòng hạng mục) thì mặc định không dùng
         const nItem = det ? DXG.extractLines(grid, det, sh.name).filter(l => l.kind === 'item').length : 0;
-        const entry = { si, name: sh.name, grid, formulas: wb.formulaCells(si), det: det ? JSON.parse(JSON.stringify(det)) : { headerRow: 0, dataStart: 1, cols: {} }, include: nItem > 0, auto: !!det };
+        const entry = { si, name: sh.name, grid, formulas: wb.formulaCells(si), fText: wb.formulaText(si), det: det ? JSON.parse(JSON.stringify(det)) : { headerRow: 0, dataStart: 1, cols: {} }, include: nItem > 0, auto: !!det };
         // sheet không có dòng hạng mục (bìa, tổng hợp, mẫu trống…) không cần điền giá: bỏ khỏi danh sách; file xuất vẫn giữ nguyên sheet đó
         (nItem ? S.sheets : skipped).push(entry);
       });
@@ -296,7 +303,8 @@
       $('#n-base').textContent = `${file.name} · ${NF.format(list.length)} giá`;
       if (S.items.length) { applyBaseline(); recompute(); }
       const hit = S.items.filter(it => isNum(it.baseFile)).length;
-      msg(S.items.length ? `Baseline: đọc ${NF.format(list.length)} giá, ghép được ${NF.format(hit)}/${NF.format(S.items.length)} dòng BOQ.` : `Đã đọc ${NF.format(list.length)} giá baseline.`, 'ok');
+      const t = S.items.length ? totals(S.items) : null;
+      msg(t ? `Baseline: đọc ${NF.format(list.length)} giá, ghép được ${NF.format(hit)}/${NF.format(S.items.length)} dòng BOQ — so với CSDL: ${NF.format(t.blOk)} phù hợp, ${NF.format(t.blXem)} cần xem, ${NF.format(t.blKo)} không phù hợp. Chọn "Giá điền: ${PICK.base.label}" để điền baseline phù hợp vào BOQ.` : `Đã đọc ${NF.format(list.length)} giá baseline. Sau khi tính giá, mỗi dòng có đánh giá baseline phù hợp / không phù hợp với CSDL.`, 'ok');
     } catch (e) { console.error(e); msg('Không đọc được file baseline: ' + (e.message || e), 'err'); }
   }
   // Đơn giá bổ sung: thêm vào CSDL ngay trong phiên (không ghi ra gói dữ liệu)
@@ -436,15 +444,20 @@
     for (const sh of use) {
       const lines = DXG.extractLines(sh.grid, sh.det, sh.name);
       S.lines.push({ kind: 'sheet', sheet: sh.name });
+      // Bảng tách Đơn giá thành Vật liệu | Nhân công mà không có cột tổng: đơn giá của dòng = VL + NC
+      const rc0 = sh.det.cols.rate, splitVL = rc0 !== undefined && sh.det.cols.lab !== undefined && /vat lieu|vat tu|material/.test(DXG.norm((sh.grid[sh.det.headerRow + 1] || [])[rc0] || ''));
+      const ac0 = sh.det.cols.amount;
       for (const l of lines) {
+        if (ac0 !== undefined && (l.kind === 'item' || l.kind === 'sum')) l.fAmt = (sh.fText || new Map()).get(XLSXIO.colName(ac0) + (l.r + 1)) || null;
         if (l.kind === 'item') {
+          l.rateEff = splitVL && isNum(l.rate) && isNum(l.lab) ? l.rate + l.lab : l.rate;
           l.id = `${sh.name}|${l.r}`; l.si = sh.si; l.sh = sh;
           l.cands = matchLine(l);
           l.sel = l.cands.length ? 0 : -1;
           l.auto = l.cands.length ? l.cands[0].g : -1;   // nhóm phần mềm đề xuất (ghi nhận là nhóm bị bác khi QS chọn nhóm khác)
           l.baseCol = isNum(l.base) && l.base > 0 ? l.base : null;
           l.baseFile = null; l.baseManual = null; l.manual = null; l.skip = false; l.note = '';
-          l.qs = isNum(l.rate) && l.rate > 0 ? l.rate : null;   // giá đang có trong ô đơn giá
+          l.qs = isNum(l.rateEff) && l.rateEff > 0 ? l.rateEff : null;   // giá đang có trong ô đơn giá (VL + NC nếu bảng tách 2 cột)
           const rc = sh.det.cols.rate;
           l.rateFormula = rc !== undefined && sh.formulas.has(XLSXIO.colName(rc) + (l.r + 1));
           const ac = sh.det.cols.amount;
@@ -457,10 +470,16 @@
     }
     if (S.session) applySession();
     applyBaseline();
+    runAudit();
     console.log(`Khớp ${S.items.length} dòng trong ${Math.round(performance.now() - t0)} ms`);
     btn.disabled = false; btn.textContent = 'Tính giá điền →';
     $('#step-res').hidden = false;
     S.view.shown = PAGE;
+    // BOQ đã có giá ở phần lớn các dòng: mở thẳng thẻ Kiểm tra BOQ; BOQ chưa có giá: về Chi tiết dòng
+    const priced = S.items.filter(it => isNum(it.qs)).length;
+    if (S.items.length && priced >= S.items.length * 0.5) S.view.tab = 'audit';
+    else if (S.view.tab === 'audit') S.view.tab = 'lines';
+    switchTab(S.view.tab);
     recompute();
     $('#step-res').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
@@ -474,6 +493,13 @@
     if (!S.baseList) return;
     const res = DXG.matchBaseline(S.items, S.baseList);
     for (const it of S.items) { const b = res.get(it); it.baseFile = b ? b.price : null; it.baseHow = b ? b.how : ''; }
+  }
+  // Kiểm tra số học BOQ đã có giá: gắn danh sách lỗi vào từng dòng
+  function runAudit() {
+    S.audit = DXG.auditBoq(S.lines.filter(l => l.kind !== 'sheet'));
+    const byKey = new Map(S.items.map(it => [`${it.sheet}|${it.r}`, it]));
+    for (const it of S.items) it.issues = [];
+    for (const x of S.audit) { const it = byKey.get(`${x.sheet}|${x.r}`); if (it) it.issues.push(x); }
   }
   function applySession() {
     const map = new Map((S.session.items || []).map(x => [x.id, x]));
@@ -523,6 +549,13 @@
     const ref = shown ? { p10: st.p10 * f, p25: st.p25 * f, p50: st.med * f, p75: st.p75 * f, p90: st.p90 * f } : null;
     // ---- Giá điền và có điền hay không
     const best = shown ? roundPrice(PICK[o.pick].f(st) * f) : null;
+    // ---- Baseline và đánh giá phù hợp / không phù hợp với CSDL (chỉ khi nhóm khớp đủ tin cậy và cùng đơn vị)
+    const base = isNum(it.baseManual) ? it.baseManual : isNum(it.baseFile) ? it.baseFile : it.baseCol;
+    const baseSrc = isNum(it.baseManual) ? 'nhập tay' : isNum(it.baseFile) ? 'file baseline' : isNum(it.baseCol) ? 'cột BOQ' : '';
+    const reliable = shown && c.unitOk !== false && (c.picked || FIT_RANK[fit.level] >= FIT_RANK[o.minFit]);
+    const bv = reliable ? DXG.judgeBaseline(base, ref, o.tolBl) : null;
+    // Giá đang có trong BOQ so với thị trường (CSDL): phù hợp / cần xem / cao quá / thấp quá
+    const pv = reliable && !it.skip ? DXG.judgePrice(it.qs, ref, o.tolBl) : null;
     let price = null, fill = false, why = '';
     const hasRate = it.sh.det.cols.rate !== undefined, col = o.mode === 'col';
     // Cột riêng: giá đề xuất ghi vào cột mới, ô Đơn giá (kể cả ô đã có giá QS) không bị đụng tới
@@ -531,11 +564,13 @@
     else if (!col && it.rateFormula) why = 'Ô đơn giá là công thức — giữ nguyên';
     else if (!col && isNum(it.qs) && !o.overwrite) { why = 'Ô đã có giá — giữ nguyên'; price = it.qs; }
     else if (isNum(it.manual)) { price = it.manual; fill = true; why = 'Giá nhập tay'; }
+    else if (o.pick === 'base' && bv && bv.ok) { price = base; fill = true; why = bv.level === 'ok' ? 'Baseline — phù hợp với CSDL' : 'Baseline — cần xem (ngoài P25–P75, trong P10–P90)'; }
+    else if (o.pick === 'base' && isNum(base) && !reliable) { price = base; fill = true; why = 'Baseline — chưa đối chiếu được với CSDL, nên kiểm tra'; }
     else if (!shown) why = c && st && st.n === 0 ? 'Nhóm khớp không có báo giá thuộc nguồn đang chọn' : 'Không có tham khảo trong CSDL — QS tự định giá';
     else if (c.unitOk === false) why = `Khác đơn vị (CSDL: ${IX.groups[c.g].unit}) — không điền`;
     else if (FIT_RANK[fit.level] < FIT_RANK[o.minFit]) { why = `Khớp ${FIT[fit.level].toLowerCase()} — không điền, QS kiểm tra`; }
     else if (!isNum(best) || best <= 0) why = 'Không tính được giá';
-    else { price = best; fill = true; why = PICK[o.pick].label + (fit.level === 'cao' ? '' : ` · khớp ${FIT[fit.level].toLowerCase()}, nên kiểm tra`); }
+    else { price = best; fill = true; why = (o.pick === 'base' ? (bv ? `Baseline ${BL_EVAL[bv.level].toLowerCase()} — dùng P25 CSDL` : 'Không có baseline — dùng P25 CSDL') : PICK[o.pick].label) + (fit.level === 'cao' ? '' : ` · khớp ${FIT[fit.level].toLowerCase()}, nên kiểm tra`); }
     if (col) why = why.replace(/không điền/g, 'không đề xuất');
     // ---- Đánh giá giá đang có trong file (nếu QS đã nhập)
     const qs = it.qs, d50 = ref && isNum(qs) && ref.p50 ? qs / ref.p50 - 1 : null;
@@ -546,8 +581,6 @@
     else if ((qs >= ref.p25 && qs <= ref.p75) || Math.abs(d50) <= o.tolOk) ev = 'ok';
     else if ((qs < ref.p10 || qs > ref.p90) && Math.abs(d50) > o.tolBt) ev = 'bt';
     else ev = 'xem';
-    const base = isNum(it.baseManual) ? it.baseManual : isNum(it.baseFile) ? it.baseFile : it.baseCol;
-    const baseSrc = isNum(it.baseManual) ? 'nhập tay' : isNum(it.baseFile) ? 'file baseline' : isNum(it.baseCol) ? 'cột BOQ' : '';
     const finalPrice = isNum(price) ? price : null;
     const dev = DXG.diff(finalPrice, base, it.qty);
     const devHi = !!(dev && dev.pct !== null && Math.abs(dev.pct) > o.tolBl);
@@ -561,7 +594,7 @@
       if (o.mode === 'col' && isNum(it.qs)) notes.push(`Ô Đơn giá đang có ${fmt(it.qs)} — giữ nguyên`);
       if (c.learned && !c.picked) notes.push(c.learned === 'exact' ? 'Theo dữ liệu học (QS đã chọn nhóm này)' : 'Theo dữ liệu học (mô tả gần giống)');
     }
-    it.c = { cand: c, pool, shown, st, fit, ref, best, price: finalPrice, fill, why, qs, d50, ev, base, baseSrc, dev, devHi, notes,
+    it.c = { cand: c, pool, shown, st, fit, ref, best, price: finalPrice, fill, why, qs, d50, ev, base, baseSrc, bv, pv, pvAmt: pv && isNum(it.qty) ? (it.qs - ref.p50) * it.qty : null, dev, devHi, notes,
       amt: isNum(finalPrice) && isNum(it.qty) ? finalPrice * it.qty : null, amtBase: isNum(base) && isNum(it.qty) ? base * it.qty : null };
     return it.c;
   }
@@ -570,13 +603,13 @@
     readOptions();
     for (const it of S.items) calc(it);
     renderKpis();
-    if (S.view.tab === 'lines') renderTable(); else renderSummary();
+    renderTab();
     if (S.view.cur) renderDrawer(S.view.cur);
   }
 
   /* ---------- KPI ---------- */
   function totals(items) {
-    const t = { n: 0, fill: 0, keep: 0, none: 0, amt: 0, amtFill: 0, bt: 0, base: 0, withBase: 0, nBase: 0, devHi: 0 };
+    const t = { n: 0, fill: 0, keep: 0, none: 0, amt: 0, amtFill: 0, bt: 0, base: 0, withBase: 0, nBase: 0, devHi: 0, blOk: 0, blXem: 0, blKo: 0, blNa: 0 };
     for (const it of items) {
       const c = it.c; if (it.skip) continue;
       t.n++;
@@ -587,6 +620,8 @@
       if (isNum(c.qs) && c.ev === 'bt') t.bt++;
       if (isNum(c.amt) && isNum(c.amtBase)) { t.withBase += c.amt; t.base += c.amtBase; t.nBase++; }
       if (c.devHi) t.devHi++;
+      if (c.bv) { if (c.bv.level === 'ok') t.blOk++; else if (c.bv.level === 'xem') t.blXem++; else t.blKo++; }
+      else if (isNum(c.base)) t.blNa++;
     }
     return t;
   }
@@ -599,6 +634,8 @@
       [col ? 'Không đề xuất — QS định giá' : 'Không điền — QS định giá', NF.format(t.none), 'không có tham khảo hoặc khớp chưa đủ tin cậy', 'none'],
       col ? ['Tổng giá trị theo giá đề xuất', fmt(t.amt), 'KL × giá đề xuất (chỉ các dòng có đề xuất)', '']
         : ['Tổng giá trị sau khi điền', fmt(t.amt), `trong đó phần điền mới ${fmt(t.amtFill)}`, ''],
+      ...(() => { const q = auditTotals(); return q.priced ? [['Kiểm tra BOQ', `${NF.format(q.err)} lỗi số học · ${NF.format(q.cao + q.thap)} giá bất thường`, `${q.verdict} — ${NF.format(q.cao)} cao quá, ${NF.format(q.thap)} thấp quá so với thị trường`, 'audit']] : []; })(),
+      ['Baseline so với CSDL', t.blOk + t.blXem + t.blKo ? `${NF.format(t.blKo)} không phù hợp` : '—', t.blOk + t.blXem + t.blKo + t.blNa ? `${NF.format(t.blOk)} phù hợp · ${NF.format(t.blXem)} cần xem${t.blNa ? ` · ${NF.format(t.blNa)} chưa đối chiếu được` : ''}` : (S.baseName ? 'chưa ghép được dòng nào' : 'chưa nạp baseline'), 'blko'],
       ['So với baseline', dB === null ? '—' : pct(dB), dB === null ? (S.baseName ? 'chưa ghép được dòng nào' : 'chưa nạp baseline') : `${NF.format(t.nBase)} dòng · ${NF.format(t.devHi)} dòng lệch > ${Math.round(S.opt.tolBl * 100)}%`, 'dev'],
     ].map(([k, v, s, f]) => `<div class="kpi${f ? ' clickable' : ''}" ${f ? `data-f="${f}"` : ''}><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="s">${esc(s)}</div></div>`).join('');
   }
@@ -612,6 +649,9 @@
       if (['fill', 'keep', 'none'].includes(f) && status(c) !== f) return false;
       if (f === 'bt' && !(isNum(c.qs) && c.ev === 'bt')) return false;
       if (f === 'dev' && !c.devHi) return false;
+      if (f === 'blko' && !(c.bv && !c.bv.ok)) return false;
+      if (f === 'arith' && !(it.issues || []).some(x => x.sev === 'loi')) return false;
+      if (f === 'pvko' && !(c.pv && !c.pv.ok)) return false;
       if (f === 'note' && !it.note) return false;
       if (nq && !DXG.norm(it.desc + ' ' + it.code + ' ' + it.ctx).includes(nq)) return false;
       return true;
@@ -623,6 +663,7 @@
   const ST_BADGE_COL = { fill: ['cao', 'Có đề xuất'], keep: ['tb', 'Chỉ có giá QS'], none: ['man', 'Không đề xuất'] };
   const stBadge = it => { const [cls, t] = (S.opt.mode === 'col' ? ST_BADGE_COL : ST_BADGE)[status(it.c)]; return `<span class="badge b-${cls}" title="${esc(it.c.why)}">${t}</span>`; };
   const fitBadge = it => it.c.cand ? `<span class="badge b-${it.c.fit.level}" title="Độ phù hợp của nhóm CSDL với mô tả BOQ">${it.c.cand.picked ? 'QS chọn' : FIT[it.c.fit.level]}</span>` : '';
+  const blBadge = c => c.bv ? `<div><span class="badge b-${BL_CLS[c.bv.level]}" title="Baseline so với phân bố giá CSDL: ${esc(pct(c.bv.d50))} so P50">${esc(BL_EVAL[c.bv.level])}</span></div>` : '';
   function rowHtml(l) {
     if (l.kind === 'sheet') return `<tr class="head"><td colspan="11">Sheet: ${esc(l.sheet)}</td></tr>`;
     if (l.kind === 'head') return `<tr class="head"><td>${esc(l.code)}</td><td colspan="10">${esc(l.desc)}</td></tr>`;
@@ -641,12 +682,12 @@
       <td>${stBadge(l)}<div class="price-sub">${esc(c.why)}</div></td>
       <td class="num">${fmt(c.amt)}</td>
       <td class="num">${fmt(c.base)}${c.baseSrc ? `<div class="price-sub">${esc(c.baseSrc)}</div>` : ''}</td>
-      <td class="num ${c.devHi ? 'd-hi' : c.dev ? 'd-ok' : ''}">${c.dev ? pct(c.dev.pct) : ''}</td></tr>`;
+      <td class="num ${c.devHi ? 'd-hi' : c.dev ? 'd-ok' : ''}">${c.dev ? pct(c.dev.pct) : ''}${blBadge(c)}</td></tr>`;
   }
   function renderTable() {
     const rows = visible(), items = rows.filter(l => l.kind === 'item').length;
     $('#res-tbl').innerHTML = `<thead><tr><th>Mã</th><th>Mô tả</th><th>ĐV</th><th class="num">KL</th><th>Nhóm tham khảo trong CSDL</th>
-      <th class="num">P25 – P75</th><th class="num">${S.opt.mode === 'col' ? 'Giá đề xuất' : 'Đơn giá'}</th><th>${S.opt.mode === 'col' ? 'Đề xuất' : 'Điền'}</th><th class="num">Thành tiền</th><th class="num">Baseline</th><th class="num">so BL</th></tr></thead>
+      <th class="num">P25 – P75</th><th class="num">${S.opt.mode === 'col' ? 'Giá đề xuất' : 'Đơn giá'}</th><th>${S.opt.mode === 'col' ? 'Đề xuất' : 'Điền'}</th><th class="num">Thành tiền</th><th class="num">Baseline</th><th class="num">so BL · đánh giá BL</th></tr></thead>
       <tbody>${rows.slice(0, S.view.shown).map(rowHtml).join('')}</tbody>`;
     $('#flt-count').textContent = `${NF.format(items)} dòng`;
     $('#more').hidden = rows.length <= S.view.shown;
@@ -690,7 +731,10 @@
     const kv = [['Mô tả', esc(it.desc)], ['Hạng mục cha', esc(it.ctx)], ['Đơn vị / KL', `${esc(it.unit)} · ${fmtQ(it.qty)}`],
       ['Đơn giá', `<b>${fmt(c.price)}</b> ${stBadge(it)} <span class="muted small">${esc(c.why)}</span>`],
       ['Giá đang có trong ô', isNum(it.qs) ? `${fmt(it.qs)}${c.ref ? ` · ${EVAL[c.ev]} (${pct(c.d50)} so với P50)` : ''}` : it.rateFormula ? 'ô là công thức' : '<span class="muted">trống</span>'],
-      ['Baseline', isNum(c.base) ? `${fmt(c.base)} <span class="muted small">(${esc(c.baseSrc)})</span>${c.dev ? ` · lệch <span class="${c.devHi ? 'd-hi' : 'd-ok'}">${pct(c.dev.pct)}</span>` : ''}` : '—'],
+      ['Baseline', isNum(c.base) ? `${fmt(c.base)} <span class="muted small">(${esc(c.baseSrc)})</span>${c.dev ? ` · giá điền lệch <span class="${c.devHi ? 'd-hi' : 'd-ok'}">${pct(c.dev.pct)}</span>` : ''}` : '—'],
+      ['Baseline so với CSDL', c.bv ? `<span class="badge b-${BL_CLS[c.bv.level]}">${esc(BL_EVAL[c.bv.level])}</span> <span class="muted small">${pct(c.bv.d50)} so với P50 · phù hợp: trong P25–P75 hoặc lệch P50 ≤ ${Math.round(o.tolBl * 100)}%; không phù hợp: ngoài P10–P90</span>` : isNum(c.base) ? '<span class="muted">chưa đối chiếu được (không có nhóm CSDL khớp đủ tin cậy, cùng đơn vị)</span>' : '—'],
+      ['Giá trong BOQ so với thị trường', c.pv ? `<span class="badge b-${PV_CLS[c.pv.level]}">${esc(PV_EVAL[c.pv.level])}</span> <span class="muted small">${pct(c.pv.d50)} so với P50${isNum(c.pvAmt) ? ` · chênh ${fmt(c.pvAmt)} đ theo khối lượng` : ''}</span>` : isNum(it.qs) ? '<span class="muted">chưa đối chiếu được</span>' : '—'],
+      ['Kiểm tra số học', (it.issues || []).length ? it.issues.map(x => `<div class="${x.sev === 'loi' ? 'd-hi' : x.sev === 'canh_bao' ? 'warn' : 'muted'}">${esc(x.msg)}${isNum(x.expect) ? ` — đúng ra ${fmt(x.expect)}, ghi ${fmt(x.actual)}` : ''}</div>`).join('') : '<span class="d-ok">không phát hiện lỗi</span>'],
       ['Lưu ý dữ liệu', c.notes.length ? `<span class="warn">${esc(c.notes.join(' · '))}</span>` : '—']];
     let h = `<div class="row-in" style="justify-content:space-between;margin-bottom:10px"><button class="btn sm" data-do="prev">← Dòng trước</button><button class="btn sm" data-do="next">Dòng sau →</button></div>
       <div class="kv">${kv.map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('')}</div>
@@ -755,6 +799,52 @@
     const tr = $(`#res-tbl tr[data-id="${CSS.escape(it.id)}"]`);
     if (tr) tr.outerHTML = rowHtml(it);
     renderDrawer(it);
+  }
+
+  /* ---------- Kiểm tra BOQ đã có giá: số học + giá so với thị trường ---------- */
+  function auditTotals() {
+    const q = { n: 0, priced: 0, ok: 0, xem: 0, cao: 0, thap: 0, na: 0, err: 0, warn: 0, info: 0, amtCao: 0, amtThap: 0, amtErr: 0, total: 0 };
+    for (const it of S.items) {
+      if (it.skip) continue;
+      q.n++;
+      const c = it.c; if (!c) continue;
+      if (isNum(it.qs)) { q.priced++; if (isNum(it.qty)) q.total += isNum(it.amount) ? it.amount : it.qs * it.qty; }
+      if (c.pv) { q[c.pv.level]++; if (c.pv.level === 'cao' && isNum(c.pvAmt)) q.amtCao += c.pvAmt; if (c.pv.level === 'thap' && isNum(c.pvAmt)) q.amtThap += c.pvAmt; }
+      else if (isNum(it.qs)) q.na++;
+    }
+    for (const x of S.audit || []) { if (x.sev === 'loi') { q.err++; if (isNum(x.diff)) q.amtErr += x.diff; } else if (x.sev === 'canh_bao') q.warn++; else q.info++; }
+    const judged = q.ok + q.xem + q.cao + q.thap, bad = judged ? (q.cao + q.thap) / judged : 0, errRate = q.n ? q.err / q.n : 0;
+    q.verdict = !q.priced ? 'BOQ chưa có giá' : q.err === 0 && bad <= 0.10 ? 'Tốt' : errRate > 0.05 || bad > 0.30 ? 'Kém — cần soát lại' : 'Cần chỉnh sửa';
+    q.vcls = q.verdict === 'Tốt' ? 'cao' : q.verdict.startsWith('Kém') ? 'none' : 'tb';
+    return q;
+  }
+  function renderAudit() {
+    const q = auditTotals(), o = S.opt, judged = q.ok + q.xem + q.cao + q.thap;
+    if (!q.priced) { $('#tab-audit').innerHTML = '<div class="card"><h3>Kiểm tra BOQ</h3><p class="muted">File BOQ chưa có đơn giá. Nạp BOQ đã có giá (cột Đơn giá, Thành tiền) để kiểm tra sai số học và giá cao / thấp so với thị trường.</p></div>'; return; }
+    const SEV_ORD = ['loi', 'canh_bao', 'luu_y'];
+    const arith = (S.audit || []).slice().sort((a, b) => SEV_ORD.indexOf(a.sev) - SEV_ORD.indexOf(b.sev) || Math.abs(b.diff || 0) - Math.abs(a.diff || 0));
+    const pvBad = S.items.filter(it => !it.skip && it.c.pv && !it.c.pv.ok).sort((a, b) => Math.abs(b.c.pvAmt || 0) - Math.abs(a.c.pvAmt || 0));
+    const pvXem = S.items.filter(it => !it.skip && it.c.pv && it.c.pv.level === 'xem').length;
+    const lineAt = new Map(S.lines.filter(l => l.kind === 'item' || l.kind === 'sum').map(l => [`${l.sheet}|${l.r}`, l]));
+    const seg = (n, cls, title) => n && judged ? `<span class="${cls}" style="width:${n / judged * 100}%" title="${esc(title)}: ${n}"></span>` : '';
+    $('#tab-audit').innerHTML = `<div class="sum-grid">
+      <div class="card"><h3>Đánh giá chung: <span class="badge b-${q.vcls}">${esc(q.verdict)}</span></h3>
+        <div class="kv">
+          <div>Dòng có giá</div><div>${NF.format(q.priced)} / ${NF.format(q.n)} dòng · tổng giá trị ${fmt(q.total)}</div>
+          <div>Sai số học</div><div><b class="${q.err ? 'd-hi' : 'd-ok'}">${NF.format(q.err)} lỗi</b>${q.err ? ` · tổng chênh ${fmt(q.amtErr)}` : ''} · ${NF.format(q.warn)} cảnh báo · ${NF.format(q.info)} lưu ý</div>
+          <div>Giá so với thị trường</div><div>${NF.format(q.ok)} phù hợp · ${NF.format(q.xem)} cần xem · <b class="d-hi">${NF.format(q.cao)} cao quá</b>${q.cao ? ` (+${fmt(q.amtCao)})` : ''} · <b class="d-hi">${NF.format(q.thap)} thấp quá</b>${q.thap ? ` (${fmt(q.amtThap)})` : ''}${q.na ? ` · ${NF.format(q.na)} chưa đối chiếu được` : ''}</div>
+        </div>
+        <div class="distbar">${seg(q.ok, 'c-ok', 'Phù hợp')}${seg(q.xem, 'c-lo', 'Cần xem')}${seg(q.cao + q.thap, 'c-hi', 'Cao / thấp quá')}</div>
+        <p class="small muted">Giá được so với phân bố báo giá trong CSDL (theo bộ lọc năm, loại hình, tỉnh, nguồn ở trên; giá quy về năm ${DBX.baseYear || 2026}). Phù hợp: trong P25–P75 hoặc lệch P50 ≤ ${Math.round(o.tolBl * 100)}% ("Ngưỡng lệch baseline"). Cần xem: trong P10–P90. Cao / thấp quá: ngoài P10–P90. Chỉ đối chiếu dòng khớp nhóm CSDL từ mức "${esc(FIT[o.minFit])}" và cùng đơn vị. Đánh giá chung "Tốt": không lỗi số học và ≤ 10% dòng giá bất thường; "Kém": lỗi số học > 5% số dòng hoặc > 30% giá bất thường.</p></div>
+      <div class="card"><h3>Giá cao / thấp quá so với thị trường (${pvBad.length})</h3>
+        <div class="tbl-wrap"><table><thead><tr><th>Mô tả</th><th>ĐV</th><th class="num">Đơn giá BOQ</th><th class="num">P10 – P90</th><th class="num">so P50</th><th class="num">Chênh × KL</th></tr></thead><tbody>
+        ${pvBad.map(it => `<tr data-id="${esc(it.id)}" class="jump"><td>${esc(it.desc.slice(0, 70))}<div class="ctx">${esc(it.sheet)} · dòng ${it.r + 1}</div></td><td>${esc(it.unit)}</td><td class="num">${fmt(it.qs)}</td><td class="num small">${fmt(it.c.ref.p10)} – ${fmt(it.c.ref.p90)}</td><td class="num"><span class="badge b-none">${esc(PV_EVAL[it.c.pv.level])}</span><div class="d-hi">${pct(it.c.pv.d50)}</div></td><td class="num">${fmt(it.c.pvAmt)}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Không có dòng giá bất thường.</td></tr>'}
+        </tbody></table></div>${pvXem ? `<p class="small muted">${NF.format(pvXem)} dòng "cần xem" (ngoài P25–P75, trong P10–P90): xem ở thẻ Chi tiết dòng.</p>` : ''}</div>
+    </div>
+    <div class="card"><h3>Sai số học và lỗi lập bảng (${arith.length})</h3>
+      <div class="tbl-wrap"><table><thead><tr><th>Mức</th><th>Sheet · dòng</th><th>Mô tả</th><th>Vấn đề</th><th class="num">Đúng ra</th><th class="num">BOQ ghi</th><th class="num">Chênh lệch</th></tr></thead><tbody>
+      ${arith.map(x => { const ln = lineAt.get(`${x.sheet}|${x.r}`), it = ln && ln.kind === 'item' ? ln : null; return `<tr${it ? ` data-id="${esc(it.id)}" class="jump"` : ''}><td><span class="badge b-${x.sev === 'loi' ? 'none' : x.sev === 'canh_bao' ? 'tb' : 'man'}">${SEV[x.sev]}</span></td><td class="small">${esc(x.sheet)} · ${x.r + 1}</td><td>${esc(((ln && ln.desc) || '').slice(0, 60))}</td><td class="small">${esc(x.msg)}</td><td class="num">${fmt(x.expect)}</td><td class="num">${fmt(x.actual)}</td><td class="num ${x.diff ? 'd-hi' : ''}">${fmt(x.diff)}</td></tr>`; }).join('') || '<tr><td colspan="7" class="d-ok">Không phát hiện sai số học.</td></tr>'}
+      </tbody></table></div></div>`;
   }
 
   /* ---------- Tổng hợp ---------- */
@@ -871,16 +961,28 @@
       ['File BOQ', S.fileName], ['Ghi giá vào', col ? `Cột riêng "${DXG.PROP_HEAD}" tô màu (cột Đơn giá giữ nguyên)` : 'Ô Đơn giá đang trống'], ['Cách chọn giá', PICK[o.pick].label], ['Đơn giá bổ sung', S.extra.length ? `${S.extra.length} giá` : 'không'],
       ['Dòng hạng mục', t.n], ['Sẽ điền / đã điền', t.fill], ['Giữ giá có sẵn', t.keep], ['Để trống — QS định giá', t.none],
       ['Tổng giá trị sau khi điền', Math.round(t.amt)], ['  trong đó phần điền mới', Math.round(t.amtFill)],
+      ['Baseline phù hợp CSDL', t.blOk], ['Baseline cần xem', t.blXem], ['Baseline không phù hợp CSDL', t.blKo], ['Baseline chưa đối chiếu được', t.blNa],
       ['CSDL', `${NF.format(DBX.count)} đơn giá · giá quy về ${DBX.baseYear || 2026} · cập nhật ${DBX.built || ''}`], ['Lập lúc', new Date().toLocaleString('vi-VN', { hour12: false })]];
-    const det = [['Sheet', 'Dòng', 'Mã', 'Mô tả', 'Tiêu đề gần nhất', 'ĐV', 'KL', 'Nhóm tham khảo CSDL', 'Độ phù hợp', 'Số BG', 'P10', 'P25', 'P50', 'P75', 'P90', col ? 'Giá đề xuất' : 'Đơn giá', 'Thành tiền', 'Trạng thái', 'Lý do', 'Ghi chú', 'Giá có sẵn trong BOQ', 'Nguồn báo giá']];
+    const det = [['Sheet', 'Dòng', 'Mã', 'Mô tả', 'Tiêu đề gần nhất', 'ĐV', 'KL', 'Nhóm tham khảo CSDL', 'Độ phù hợp', 'Số BG', 'P10', 'P25', 'P50', 'P75', 'P90', col ? 'Giá đề xuất' : 'Đơn giá', 'Thành tiền', 'Trạng thái', 'Lý do', 'Ghi chú', 'Giá có sẵn trong BOQ', 'Nguồn báo giá', 'Baseline', 'Nguồn baseline', 'Baseline so với CSDL', 'Baseline so P50', 'Giá điền so baseline']];
     for (const it of S.items) {
       const c = it.c, g = c.shown ? IX.groups[c.cand.g] : null, R = c.ref;
       det.push([it.sheet, it.r + 1, it.code, it.desc, it.heads[it.heads.length - 1] || '', it.unit, it.qty, g ? g.name : '', c.cand ? FIT_T[c.fit.level] : '', g ? c.st.n : null,
-        ...(R ? [R.p10, R.p25, R.p50, R.p75, R.p90].map(Math.round) : [null, null, null, null, null]), c.price, isNum(c.amt) ? Math.round(c.amt) : null, st(c), c.why, it.note, c.qs, g ? Object.entries(c.st.src || {}).map(([l, n]) => `${l} ${n}`).join(', ') : '']);
+        ...(R ? [R.p10, R.p25, R.p50, R.p75, R.p90].map(Math.round) : [null, null, null, null, null]), c.price, isNum(c.amt) ? Math.round(c.amt) : null, st(c), c.why, it.note, c.qs, g ? Object.entries(c.st.src || {}).map(([l, n]) => `${l} ${n}`).join(', ') : '',
+        isNum(c.base) ? c.base : null, c.baseSrc, c.bv ? BL_EVAL[c.bv.level] : isNum(c.base) ? 'Chưa đối chiếu được' : '', c.bv ? pct(c.bv.d50) : '', c.dev && c.dev.pct !== null ? pct(c.dev.pct) : '']);
     }
+    const q = auditTotals();
+    sum.push(['Kiểm tra BOQ — đánh giá chung', q.verdict], ['Lỗi số học', q.err], ['Cảnh báo / lưu ý lập bảng', q.warn + q.info],
+      ['Giá phù hợp thị trường', q.ok], ['Giá cần xem', q.xem], ['Giá cao quá', q.cao], ['Giá thấp quá', q.thap], ['Chênh do giá cao quá (theo P50 × KL)', Math.round(q.amtCao)], ['Chênh do giá thấp quá (theo P50 × KL)', Math.round(q.amtThap)]);
+    const ar = [['Mức', 'Sheet', 'Dòng', 'Mô tả', 'Vấn đề', 'Đúng ra', 'BOQ ghi', 'Chênh lệch']];
+    for (const x of S.audit || []) { const ln = S.lines.find(l => l.sheet === x.sheet && l.r === x.r); ar.push([SEV[x.sev], x.sheet, x.r + 1, (ln && ln.desc) || '', x.msg, isNum(x.expect) ? Math.round(x.expect) : null, isNum(x.actual) ? Math.round(x.actual) : null, isNum(x.diff) ? Math.round(x.diff) : null]); }
+    const pr = [['Sheet', 'Dòng', 'Mã', 'Mô tả', 'ĐV', 'KL', 'Đơn giá BOQ', 'Nhóm CSDL', 'P10', 'P25', 'P50', 'P75', 'P90', 'Đánh giá', 'So P50', 'Chênh × KL (so P50)']];
+    for (const it of S.items) { const c = it.c; if (!isNum(it.qs)) continue; const R = c.ref;
+      pr.push([it.sheet, it.r + 1, it.code, it.desc, it.unit, it.qty, it.qs, c.shown ? IX.groups[c.cand.g].name : '', ...(R ? [R.p10, R.p25, R.p50, R.p75, R.p90].map(Math.round) : [null, null, null, null, null]), c.pv ? PV_EVAL[c.pv.level] : 'Chưa đối chiếu được', c.pv ? pct(c.pv.d50) : '', isNum(c.pvAmt) ? Math.round(c.pvAmt) : null]); }
     const blob = window.writeWorkbook([
-      { name: 'Tóm tắt', rows: sum, widths: [32, 70], nums: new Set([1]) },
-      { name: 'Chi tiết', rows: det, widths: [14, 6, 6, 48, 30, 7, 10, 38, 11, 7, 11, 11, 11, 11, 11, 12, 15, 20, 38, 30, 14, 26], nums: new Set([10, 11, 12, 13, 14, 15, 16, 20]) },
+      { name: 'Tóm tắt', rows: sum, widths: [36, 70], nums: new Set([1]) },
+      ...(q.priced ? [{ name: 'Kiểm tra số học', rows: ar, widths: [10, 14, 6, 48, 60, 15, 15, 15], nums: new Set([5, 6, 7]) },
+        { name: 'Kiểm tra giá', rows: pr, widths: [14, 6, 6, 48, 7, 10, 14, 38, 11, 11, 11, 11, 11, 16, 10, 16], nums: new Set([6, 8, 9, 10, 11, 12, 15]) }] : []),
+      { name: 'Chi tiết', rows: det, widths: [14, 6, 6, 48, 30, 7, 10, 38, 11, 7, 11, 11, 11, 11, 11, 12, 15, 20, 38, 30, 14, 26, 14, 14, 22, 12, 14], nums: new Set([10, 11, 12, 13, 14, 15, 16, 20, 22]) },
     ]);
     download(blob, S.fileName.replace(/\.(xlsx|xlsm)$/i, '') + '_BaoCaoDienGia.xlsx');
   }
@@ -920,11 +1022,12 @@
     $('#go').addEventListener('click', runAll);
     for (const id of ['#o-pool', '#o-mode', '#o-pick', '#o-minfit', '#o-round', '#o-overwrite', '#o-amount', '#o-yfrom', '#o-yto', '#o-factor', '#o-tol', '#o-review', '#o-outlier', '#o-warn']) $(id).addEventListener('change', recompute);
     $('#flt').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setFilter(b.dataset.f); });
-    $('#kpis').addEventListener('click', e => { const k = e.target.closest('.kpi[data-f]'); if (k) { switchTab('lines'); setFilter(k.dataset.f); } });
+    $('#kpis').addEventListener('click', e => { const k = e.target.closest('.kpi[data-f]'); if (!k) return; if (k.dataset.f === 'audit') return switchTab('audit'); switchTab('lines'); setFilter(k.dataset.f); });
     let tq; $('#flt-q').addEventListener('input', e => { clearTimeout(tq); tq = setTimeout(() => { S.view.q = e.target.value; S.view.shown = PAGE; renderTable(); }, 200); });
     $('#more').addEventListener('click', () => { S.view.shown += PAGE; renderTable(); });
     $('#res-tbl').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) openDrawer(S.items.find(it => it.id === tr.dataset.id)); });
     $('#tab-sum').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) openDrawer(S.items.find(it => it.id === tr.dataset.id)); });
+    $('#tab-audit').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) openDrawer(S.items.find(it => it.id === tr.dataset.id)); });
     $('#dw-close').addEventListener('click', closeDrawer);
     $('#dw-body').addEventListener('click', drawerAction);
     $('#dw-body').addEventListener('keydown', e => {
@@ -944,11 +1047,12 @@
       $('#load-msg').scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
   }
+  function renderTab() { if (S.view.tab === 'lines') renderTable(); else if (S.view.tab === 'audit') renderAudit(); else renderSummary(); }
   function setFilter(f) { S.view.f = f; S.view.shown = PAGE; $$('#flt button').forEach(b => b.classList.toggle('on', b.dataset.f === f)); renderTable(); }
   function switchTab(t) {
     S.view.tab = t; $$('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
-    $('#tab-lines').hidden = t !== 'lines'; $('#tab-sum').hidden = t !== 'sum';
-    if (t === 'lines') renderTable(); else renderSummary();
+    $('#tab-lines').hidden = t !== 'lines'; $('#tab-sum').hidden = t !== 'sum'; $('#tab-audit').hidden = t !== 'audit';
+    if (S.items.length && S.items[0].c) renderTab();
   }
 
   // Cho kiểm thử tự động

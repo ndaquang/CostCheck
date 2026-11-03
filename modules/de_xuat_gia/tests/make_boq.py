@@ -69,6 +69,23 @@ for code, desc, unit, price in [(1, 'Đào đất hố móng bằng máy đào',
                                 (7, 'Trát tường trong nhà dày 15mm', 'm2', 130000), (9, 'Trần thạch cao khung chìm', 'm2', 255000)]:
     bs.append([code, desc, unit, price])
 bw.save(os.path.join(out, 'Baseline_mau.xlsx'))
+# BOQ ĐÃ CÓ GIÁ để kiểm tra: số liệu nhập cứng, có sai số học, sai dòng tổng, công thức lấy nhầm dòng, giá cao / thấp
+kw = Workbook(); ks = kw.active; ks.title = 'Kiem tra'
+ks.append(['BOQ NHÀ THẦU ĐÃ CHÀO GIÁ'])
+ks.append(['STT', 'Mô tả công việc', 'Đơn vị', 'Khối lượng', 'Đơn giá', 'Thành tiền'])
+ks.append(['A', 'PHẦN MÓNG', None, None, None, None])                                   # dòng 3
+ks.append([1, 'Đào đất hố móng bằng máy đào', 'm3', 350, 46000, 16100000])             # 4 đúng
+ks.append([2, 'Bê tông lót móng đá 4x6 mác 150', 'm3', 25.5, 1600000, 40800000])       # 5 giá cao quá
+ks.append([3, 'Bê tông móng M300 đá 1x2', 'm3', 120, 1700000, 240000000])              # 6 sai số học (đúng 204.000.000)
+ks.append([4, 'Ván khuôn móng', 'm2', 410, 120000, '=D6*E6'])                          # 7 công thức lấy nhầm dòng 6; giá thấp quá
+ks.append([None, 'Cộng hạng mục A', None, None, None, 346100000])                      # 8 đúng (16,1 + 40,8 + 240 + 49,2 tr)
+ks.append(['B', 'PHẦN HOÀN THIỆN', None, None, None, None])
+ks.append([5, 'Trát tường trong nhà dày 15mm', 'm2', 1600, 100000, 160000000])
+ks.append([6, 'Trần thạch cao khung chìm', 'm2', 640, 265000, 169600000])
+ks.append([7, 'Sơn tường trong nhà 1 lớp lót 2 lớp phủ', 'm2', 1600, None, None])       # 12 chưa có giá
+ks.append([None, 'Cộng hạng mục B', None, None, None, 329600000])
+ks.append([None, 'Tổng cộng', None, None, None, 700000000])                            # 14 sai (đúng 675.700.000)
+kw.save(os.path.join(out, 'BOQ_KiemTra.xlsx'))
 print('ok')
 
 # Đơn giá bổ sung (vd báo giá NCC mới) — có hạng mục không có trong CSDL

@@ -585,6 +585,12 @@
       for (const f of doc.getElementsByTagNameNS(NS, 'f')) { const c = f.parentNode; if (c && c.getAttribute) out.add(c.getAttribute('r')); }
       return out;
     }
+    // Công thức của từng ô: Map 'G7' -> 'D7*E7' (ô theo công thức dùng chung không có nội dung riêng thì bỏ qua)
+    formulaText(si) {
+      const doc = this.xml(this.sheets[si].path), out = new Map();
+      for (const f of doc.getElementsByTagNameNS(NS, 'f')) { const c = f.parentNode, t = (f.textContent || '').trim(); if (c && c.getAttribute && t) out.set(c.getAttribute('r'), t); }
+      return out;
+    }
     // Buộc Excel tính lại khi mở (để Thành tiền / Tổng cộng cập nhật theo giá vừa điền) — chỉ sửa 1 thuộc tính
     setFullCalcOnLoad() {
       const path = 'xl/workbook.xml';
