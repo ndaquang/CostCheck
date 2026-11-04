@@ -218,3 +218,14 @@ td.desc .note { font-size: 12px; color: var(--accent); margin-top: 2px; }
 #dw-body .row-in input[type=number] { width: 110px; }
 #dw-body .dist-lab { font-size: 11px; }
 @media (max-width: 900px) { .wrap.dw-open { margin-right: auto; } }
+
+/* Chống tràn ngang trong ngăn chi tiết: tên nhóm / mô tả dài phải xuống dòng */
+#dw-body { overflow-x: hidden; }
+#dw-body .kv { grid-template-columns: 96px minmax(0, 1fr); }
+#dw-body .kv > div { overflow-wrap: anywhere; }
+.cand { grid-template-columns: 22px minmax(0, 1fr) auto; }
+.cand > div { min-width: 0; overflow-wrap: anywhere; }
+.cand > .num { max-width: 150px; white-space: normal; }
+#dw-body .tbl-wrap { max-width: 100%; }
+#dw-body .row-in { min-width: 0; }
+#dw-body .row-in input[type=search] { min-width: 0; }
