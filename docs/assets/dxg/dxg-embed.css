@@ -204,4 +204,13 @@ html.role-staff #sec-dxg .admin-only { display: none !important; }
 #sec-dxg #dw-body .dist-lab { font-size: 11px; }
 @media (max-width: 900px) {#sec-dxg .wrap.dw-open { margin-right: auto; }
  }
+#sec-dxg #dw-body { overflow-x: hidden; }
+#sec-dxg #dw-body .kv { grid-template-columns: 96px minmax(0, 1fr); }
+#sec-dxg #dw-body .kv > div { overflow-wrap: anywhere; }
+#sec-dxg .cand { grid-template-columns: 22px minmax(0, 1fr) auto; }
+#sec-dxg .cand > div { min-width: 0; overflow-wrap: anywhere; }
+#sec-dxg .cand > .num { max-width: 150px; white-space: normal; }
+#sec-dxg #dw-body .tbl-wrap { max-width: 100%; }
+#sec-dxg #dw-body .row-in { min-width: 0; }
+#sec-dxg #dw-body .row-in input[type=search] { min-width: 0; }
 
