@@ -189,6 +189,9 @@ html.role-staff #sec-dxg .admin-only { display: none !important; }
 #sec-dxg .opts .opt { text-align: left; align-items: stretch; }
 #sec-dxg .opts .opt.chk { align-items: flex-start; }
 #sec-dxg .opts .opt.chk label { display: flex; gap: 6px; align-items: center; justify-content: flex-start; }
+#sec-dxg .cloud {margin:12px 0;padding:10px 12px;border:1px solid var(--line,#d0d7de);border-radius:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#sec-dxg .cloud input, #sec-dxg .cloud select {padding:5px 8px;max-width:220px}
+#sec-dxg .cloud[hidden], #sec-dxg .cloud [hidden] {display:none}
 #sec-dxg .wrap.dw-open { margin-right: 460px; max-width: none; }
 #sec-dxg .dw-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 #sec-dxg .dw-auto { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }

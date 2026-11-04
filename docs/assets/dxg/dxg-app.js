@@ -1080,7 +1080,56 @@
     if (S.items.length && S.items[0].c) renderTab();
   }
 
+  /* ---------- Lưu đám mây (Supabase): theo dự án, mỗi lần lưu là một phiên bản ---------- */
+  function initCloud() {
+    const box = $('#cloud');
+    if (!box || !window.DXGCloud || !EMBED || !ADMIN) return;   // chỉ bản admin nhúng trong app
+    const C = window.DXGCloud, st = t => { $('#cl-st').textContent = t; };
+    let last = '', lastAt = 0, busy = false;
+    box.hidden = false;
+    const fillProjects = async sel => {
+      const ps = await C.listProjects();
+      $('#cl-proj').innerHTML = '<option value="">— chọn dự án —</option>' + ps.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+      if (sel) $('#cl-proj').value = sel;
+      await fillVersions();
+    };
+    const fillVersions = async () => {
+      const id = $('#cl-proj').value;
+      const vs = id ? await C.listVersions(id) : [];
+      $('#cl-vers').innerHTML = vs.map(v => `<option value="${v.id}">v${v.version} · ${new Date(v.created_at).toLocaleString('vi-VN')} · ${v.item_count} dòng</option>`).join('');
+    };
+    const save = async force => {
+      const pid = $('#cl-proj').value;
+      if (!C.signedIn || !pid || !S.items.length || busy) return;
+      const data = sessionData(); const key = JSON.stringify({ ...data, at: 0 });
+      if (key === last || (!force && Date.now() - lastAt < 30000)) return;
+      busy = true;
+      try { const v = await C.saveVersion(pid, S.fileName || '(chưa đặt tên)', data); last = key; lastAt = Date.now(); st(`Đã lưu v${v.version} lúc ${new Date().toLocaleTimeString('vi-VN')}`); await fillVersions(); }
+      catch (e) { st('Lỗi lưu: ' + (e.message || e)); }
+      busy = false;
+    };
+    $('#cl-in').addEventListener('click', async () => {
+      try { st('Đang đăng nhập…'); await C.login($('#cl-mail').value.trim(), $('#cl-pass').value); $('#cl-pass').value = '';
+        $('#cl-login').hidden = true; $('#cl-main').hidden = false; $('#cl-who').textContent = C.email; st(''); await fillProjects(); }
+      catch (e) { st(e.message || String(e)); }
+    });
+    $('#cl-out').addEventListener('click', () => { C.logout(); $('#cl-main').hidden = true; $('#cl-login').hidden = false; st(''); });
+    $('#cl-proj').addEventListener('change', () => fillVersions().catch(e => st(e.message)));
+    $('#cl-new').addEventListener('click', async () => {
+      const n = (prompt('Tên dự án:') || '').trim(); if (!n) return;
+      try { const p = await C.createProject(n); await fillProjects(p.id); st('Đã tạo dự án.'); } catch (e) { st('Không tạo được: ' + (e.message || e)); }
+    });
+    $('#cl-save').addEventListener('click', () => save(true));
+    $('#cl-restore').addEventListener('click', async () => {
+      const id = $('#cl-vers').value; if (!id) return;
+      try { const j = await C.getVersion(id); S.session = j; if (S.items.length) { rematch(j); msg('Đã khôi phục phiên bản từ đám mây.', 'ok'); } else msg('Đã nạp phiên bản. Nạp file BOQ tương ứng để tiếp tục.', 'ok'); }
+      catch (e) { st('Không khôi phục được: ' + (e.message || e)); }
+    });
+    setInterval(() => save(false), 10000);   // tự lưu: chỉ khi nội dung đổi, tối đa 1 lần / 30 giây
+  }
+
   // Cho kiểm thử tự động
   window.__DXG_STATE = S;
   boot();
+  initCloud();
 })();
