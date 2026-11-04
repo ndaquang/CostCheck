@@ -37,9 +37,10 @@
     async login(mail, pass) {
       setSession(await raw('/auth/v1/token?grant_type=password', { method: 'POST', body: JSON.stringify({ email: mail, password: pass }) }));
       email = mail;
-      // Kiểm tra quyền admin: RLS trả rỗng/lỗi nếu không đúng vai trò.
-      try { await rest('dxg_projects?select=id&limit=1'); }
-      catch (e) { this.logout(); throw new Error('Tài khoản này không có quyền admin trên Supabase.'); }
+      // Kiểm tra quyền admin ngay từ token (RLS chỉ trả rỗng, không báo lỗi, nên không dùng truy vấn để kiểm tra).
+      let role = '';
+      try { role = (JSON.parse(atob(tok.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).app_metadata || {}).role || ''; } catch (e) { /* token lạ */ }
+      if (role !== 'admin') { this.logout(); throw new Error('Tài khoản này chưa có vai trò admin trên Supabase. Nhờ quản trị cấp quyền rồi đăng nhập lại.'); }
     },
     logout() { tok = refresh = null; exp = 0; email = ''; },
     listProjects() { return rest('dxg_projects?select=id,name,created_at&archived=eq.false&order=name.asc'); },
