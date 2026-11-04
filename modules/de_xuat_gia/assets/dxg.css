@@ -137,7 +137,7 @@ td.grp { min-width: 180px; max-width: 260px; font-size: 12.5px; }
 .seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .more { text-align: center; padding: 10px; }
 
-#dxg-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(720px, 100vw); z-index: 40; background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0,0,0,.12); display: flex; flex-direction: column; }
+#dxg-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); z-index: 40; background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0,0,0,.12); display: flex; flex-direction: column; }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 #dw-body { overflow: auto; padding: 14px 16px 40px; }
 #dw-body h4 { margin: 18px 0 6px; font-size: 13px; color: var(--text-2); }
@@ -202,3 +202,19 @@ td.desc .note { font-size: 12px; color: var(--accent); margin-top: 2px; }
 .opts .opt { text-align: left; align-items: stretch; }
 .opts .opt.chk { align-items: flex-start; }
 .opts .opt.chk label { display: flex; gap: 6px; align-items: center; justify-content: flex-start; }
+
+/* Ngăn chi tiết gọn: đẩy bảng sang trái, không che cột bên phải */
+.wrap.dw-open { margin-right: 460px; max-width: none; }
+.dw-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.dw-auto { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
+#dw-body .kv { grid-template-columns: 96px 1fr; gap: 2px 8px; }
+#dw-body h4 { margin: 12px 0 4px; }
+.drawer-head { padding: 8px 12px; font-size: 13px; }
+#dw-body { padding: 10px 12px 30px; }
+.dw-more { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 6px; }
+.dw-more > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.dw-more[open] > summary { margin-bottom: 6px; }
+.cand { padding: 6px 8px; margin-bottom: 4px; }
+#dw-body .row-in input[type=number] { width: 110px; }
+#dw-body .dist-lab { font-size: 11px; }
+@media (max-width: 900px) { .wrap.dw-open { margin-right: auto; } }
