@@ -697,11 +697,23 @@
   const projOf = i => (DBX.projects || [])[IX.C.p ? IX.C.p[i] : -1] || [];
   function openDrawer(it) {
     if (!it) return;
-    S.view.cur = it; renderDrawer(it); $('#dxg-drawer').hidden = false;
+    S.view.cur = it; renderDrawer(it); $('#dxg-drawer').hidden = false; dockWrap(true);
+    $('#dw-body').scrollTop = 0;
     $$('#res-tbl tr.sel').forEach(r => r.classList.remove('sel'));
-    const tr = $(`#res-tbl tr[data-id="${CSS.escape(it.id)}"]`); if (tr) tr.classList.add('sel');
+    const tr = $(`#res-tbl tr[data-id="${CSS.escape(it.id)}"]`); if (tr) { tr.classList.add('sel'); tr.scrollIntoView({ block: 'center' }); }
   }
-  function closeDrawer() { S.view.cur = null; $('#dxg-drawer').hidden = true; $$('#res-tbl tr.sel').forEach(r => r.classList.remove('sel')); }
+  function closeDrawer() { S.view.cur = null; $('#dxg-drawer').hidden = true; dockWrap(false); $$('#res-tbl tr.sel').forEach(r => r.classList.remove('sel')); }
+  // Ngăn chi tiết đẩy bảng sang trái (không che các cột bên phải); màn hình hẹp thì phủ lên
+  function dockWrap(on) { const w = $('#res-tbl').closest('.wrap'); if (w) w.classList.toggle('dw-open', on); }
+  // Sau khi chọn nhóm / lưu giá: tự sang dòng kế tiếp (tắt được, nhớ lựa chọn)
+  const AUTO_KEY = 'dxg.autoNext';
+  const autoNext = () => { try { return localStorage.getItem(AUTO_KEY) !== '0'; } catch (e) { return true; } };
+  function nextItem(it) { const list = visible().filter(l => l.kind === 'item'), k = list.indexOf(it); return k >= 0 ? list[k + 1] : null; }
+  function done(it) {   // đã xử lý xong dòng: cập nhật rồi chuyển dòng (nếu bật)
+    const nx = autoNext() ? nextItem(it) : null;
+    refreshItem(it);
+    if (nx) openDrawer(nx);
+  }
   // Thanh phân bố P10–P90, giá điền và baseline
   function distBar(c) {
     if (!c.ref) return '';
@@ -730,54 +742,62 @@
     $('#dw-title').textContent = `${it.sheet} · dòng Excel ${it.r + 1}${it.code ? ' · mã ' + it.code : ''}`;
     const kv = [['Mô tả', esc(it.desc)], ['Hạng mục cha', esc(it.ctx)], ['Đơn vị / KL', `${esc(it.unit)} · ${fmtQ(it.qty)}`],
       ['Đơn giá', `<b>${fmt(c.price)}</b> ${stBadge(it)} <span class="muted small">${esc(c.why)}</span>`],
-      ['Giá đang có trong ô', isNum(it.qs) ? `${fmt(it.qs)}${c.ref ? ` · ${EVAL[c.ev]} (${pct(c.d50)} so với P50)` : ''}` : it.rateFormula ? 'ô là công thức' : '<span class="muted">trống</span>'],
+      ['Giá đang có trong ô', isNum(it.qs) ? `${fmt(it.qs)}${c.ref ? ` · ${EVAL[c.ev]} (${pct(c.d50)} so với P50)` : ''}` : it.rateFormula ? 'ô là công thức' : '<span class="muted">trống</span>']];
+    const kv2 = [
       ['Baseline', isNum(c.base) ? `${fmt(c.base)} <span class="muted small">(${esc(c.baseSrc)})</span>${c.dev ? ` · giá điền lệch <span class="${c.devHi ? 'd-hi' : 'd-ok'}">${pct(c.dev.pct)}</span>` : ''}` : '—'],
       ['Baseline so với CSDL', c.bv ? `<span class="badge b-${BL_CLS[c.bv.level]}">${esc(BL_EVAL[c.bv.level])}</span> <span class="muted small">${pct(c.bv.d50)} so với P50 · phù hợp: trong P25–P75 hoặc lệch P50 ≤ ${Math.round(o.tolBl * 100)}%; không phù hợp: ngoài P10–P90</span>` : isNum(c.base) ? '<span class="muted">chưa đối chiếu được (không có nhóm CSDL khớp đủ tin cậy, cùng đơn vị)</span>' : '—'],
       ['Giá trong BOQ so với thị trường', c.pv ? `<span class="badge b-${PV_CLS[c.pv.level]}">${esc(PV_EVAL[c.pv.level])}</span> <span class="muted small">${pct(c.pv.d50)} so với P50${isNum(c.pvAmt) ? ` · chênh ${fmt(c.pvAmt)} đ theo khối lượng` : ''}</span>` : isNum(it.qs) ? '<span class="muted">chưa đối chiếu được</span>' : '—'],
       ['Kiểm tra số học', (it.issues || []).length ? it.issues.map(x => `<div class="${x.sev === 'loi' ? 'd-hi' : x.sev === 'canh_bao' ? 'warn' : 'muted'}">${esc(x.msg)}${isNum(x.expect) ? ` — đúng ra ${fmt(x.expect)}, ghi ${fmt(x.actual)}` : ''}</div>`).join('') : '<span class="d-ok">không phát hiện lỗi</span>'],
       ['Lưu ý dữ liệu', c.notes.length ? `<span class="warn">${esc(c.notes.join(' · '))}</span>` : '—']];
-    let h = `<div class="row-in" style="justify-content:space-between;margin-bottom:10px"><button class="btn sm" data-do="prev">← Dòng trước</button><button class="btn sm" data-do="next">Dòng sau →</button></div>
+    const flags = [c.bv && !c.bv.ok ? `BL ${BL_EVAL[c.bv.level]}` : '', c.pv && !c.pv.ok ? `giá ${PV_EVAL[c.pv.level]}` : '', (it.issues || []).some(x => x.sev === 'loi') ? 'lỗi số học' : '', c.notes.length ? 'có lưu ý' : ''].filter(Boolean);
+    const hasList = visible().filter(l => l.kind === 'item'), pos = hasList.indexOf(it);
+    let h = `<div class="dw-nav"><button class="btn sm" data-do="prev">← Trước</button>
+        <span class="small muted">${pos >= 0 ? `${pos + 1} / ${hasList.length}` : ''}</span>
+        <label class="small dw-auto" title="Sau khi chọn nhóm hoặc bấm Lưu, tự chuyển sang dòng kế tiếp"><input type="checkbox" id="dw-auto"${autoNext() ? ' checked' : ''}> Tự sang dòng sau</label>
+        <button class="btn sm" data-do="next">Sau →</button></div>
       <div class="kv">${kv.map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('')}</div>
-      <h4>Phân bố giá trong CSDL${o.factor !== 1 ? ` (đã nhân hệ số ${Math.round(o.factor * 1000) / 10}%)` : ''}</h4>
-      ${c.ref ? distBar(c) : '<div class="muted small">Chưa có nhóm tham khảo phù hợp — chọn hoặc tìm nhóm bên dưới, hoặc nhập giá tay.</div>'}
+      <details class="dw-more"${S.view.dwMore ? ' open' : ''} data-key="dwMore"><summary>Đánh giá & kiểm tra${flags.length ? ` <span class="warn small">· ${esc(flags.join(' · '))}</span>` : ''}</summary>
+        <div class="kv">${kv2.map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('')}</div></details>
       <h4>Điều chỉnh</h4>
       <div class="row-in"><label for="dw-manual">Giá điền tay</label><input type="number" id="dw-manual" step="any" value="${isNum(it.manual) ? it.manual : ''}" placeholder="${fmt(c.best)}">
         <label for="dw-base">Baseline</label><input type="number" id="dw-base" step="any" value="${isNum(it.baseManual) ? it.baseManual : ''}" placeholder="${isNum(it.baseFile ?? it.baseCol) ? fmt(it.baseFile ?? it.baseCol) : 'nhập giá'}">
         <label><input type="checkbox" id="dw-skip"${it.skip ? ' checked' : ''}> Không điền dòng này</label>
-        <button class="btn sm primary" data-do="apply">Lưu</button></div>
-      <textarea id="dw-note" rows="2" placeholder="Ghi chú cho dòng này (không ghi vào file BOQ)">${esc(it.note)}</textarea>
+        <button class="btn sm primary" data-do="apply">Lưu & sang dòng sau</button></div>
+      <textarea id="dw-note" rows="1" placeholder="Ghi chú cho dòng này (không ghi vào file BOQ)">${esc(it.note)}</textarea>
       <h4>Nhóm công việc tham khảo trong CSDL ${it.cands.length ? '' : '<span class="muted">(không tìm thấy — tìm thủ công bên dưới)</span>'}</h4>
       ${it.cands.map((cd, k) => candHtml(it, cd, k)).join('')}
       ${it.sel >= 0 ? '<button class="link small" data-do="unsel">Không dùng nhóm nào (không điền giá tự động)</button>' : ''}
-      <h4>Tìm nhóm khác trong CSDL</h4>
-      <div class="row-in"><input type="search" id="dw-q" placeholder="vd: bê tông lót móng M150"><button class="btn sm" data-do="search">Tìm</button></div>
-      <div id="dw-sr"></div>`;
+      <details class="dw-more"${S.view.dwDist ? ' open' : ''} data-key="dwDist"><summary>Phân bố giá trong CSDL${o.factor !== 1 ? ` (đã nhân hệ số ${Math.round(o.factor * 1000) / 10}%)` : ''}</summary>
+        ${c.ref ? distBar(c) : '<div class="muted small">Chưa có nhóm tham khảo phù hợp — chọn hoặc tìm nhóm bên dưới, hoặc nhập giá tay.</div>'}</details>
+      <details class="dw-more"${S.view.dwFind ? ' open' : ''} data-key="dwFind"><summary>Tìm nhóm khác trong CSDL</summary>
+        <div class="row-in"><input type="search" id="dw-q" placeholder="vd: bê tông lót móng M150"><button class="btn sm" data-do="search">Tìm</button></div>
+        <div id="dw-sr"></div></details>`;
     if (c.shown) {
       const ids = [...c.st.ids].sort((a, b) => (IX.C.y[b] || 0) - (IX.C.y[a] || 0)).slice(0, 60);
-      h += `<h4>Báo giá tham khảo (${c.st.n}${c.st.n > ids.length ? `, hiện ${ids.length} mới nhất` : ''})</h4>
+      h += `<details class="dw-more"${S.view.dwRefs ? ' open' : ''} data-key="dwRefs"><summary>Báo giá tham khảo (${c.st.n}${c.st.n > ids.length ? `, hiện ${ids.length} mới nhất` : ''})</summary>
         <div class="tbl-wrap"><table class="refs"><thead><tr><th>Năm</th>${ADMIN ? '<th>Dự án</th>' : ''}<th>Tỉnh/TP</th>${nhieuNguon() ? '<th>Nguồn</th>' : ''}<th>Tên trong báo giá</th><th class="num">Giá quy đổi</th><th class="num">Giá gốc</th></tr></thead><tbody>
         ${ids.map(i => { const p = projOf(i); return `<tr><td>${IX.C.y[i] || ''}</td>${ADMIN ? `<td>${esc(p[1] || p[0] || '')}</td>` : ''}<td>${esc(p[4] || p[3] || '')}</td>${nhieuNguon() ? `<td>${esc(IX.D.ng[IX.C.ng[i]] || '')}</td>` : ''}<td>${esc(IX.C.name[i])}</td><td class="num">${fmt(IX.price(i) * (c.st.rate.get(i) ?? c.cand.ratio) * o.factor)}</td><td class="num small">${fmt(IX.C.tot[i])} /${esc(IX.unitOf(i))}</td></tr>`; }).join('')}
-        </tbody></table></div>`;
+        </tbody></table></div></details>`;
     }
     $('#dw-body').innerHTML = h;
   }
   function drawerAction(e) {
     const it = S.view.cur; if (!it) return;
     const cand = e.target.closest('.cand[data-k]');
-    if (cand) { it.sel = +cand.dataset.k; it.cands[it.sel] = { ...it.cands[it.sel], picked: true }; return refreshItem(it); }
+    if (cand) { keepNote(it); it.sel = +cand.dataset.k; it.cands[it.sel] = { ...it.cands[it.sel], picked: true }; return done(it); }
     const sr = e.target.closest('[data-g]');
     if (sr) {
       const gid = +sr.dataset.g;
       let k = it.cands.findIndex(x => x.g === gid);
       if (k < 0) { it.cands.unshift(manualCand(gid, it.unit)); k = 0; }
       else it.cands[k] = { ...it.cands[k], picked: true };
-      it.sel = k; return refreshItem(it);
+      keepNote(it); it.sel = k; return done(it);
     }
     const act = e.target.dataset && e.target.dataset.do;
     if (act === 'apply') {
       const m = $('#dw-manual').value.trim(), b = $('#dw-base').value.trim();
       it.manual = m === '' ? null : +m; it.baseManual = b === '' ? null : +b; it.note = $('#dw-note').value.trim(); it.skip = $('#dw-skip').checked;
-      return refreshItem(it);
+      return done(it);
     }
     if (act === 'unsel') { it.sel = -1; return refreshItem(it); }
     if (act === 'search') return drawerSearch(it);
@@ -786,6 +806,7 @@
       openDrawer(list[k + (act === 'next' ? 1 : -1)]);
     }
   }
+  function keepNote(it) { const n = $('#dw-note'); if (n) it.note = n.value.trim(); }
   function drawerSearch(it) {
     const q = $('#dw-q').value.trim(); if (!q) return;
     const res = DXG.match(IX, { desc: q, unit: it.unit, ctx: '' }, { limit: 12 });
@@ -1030,6 +1051,10 @@
     $('#tab-audit').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) openDrawer(S.items.find(it => it.id === tr.dataset.id)); });
     $('#dw-close').addEventListener('click', closeDrawer);
     $('#dw-body').addEventListener('click', drawerAction);
+    $('#dw-body').addEventListener('change', e => {
+      if (e.target.id === 'dw-auto') { try { localStorage.setItem(AUTO_KEY, e.target.checked ? '1' : '0'); } catch (ex) { /* không lưu được thì thôi */ } }
+    });
+    $('#dw-body').addEventListener('toggle', e => { const k = e.target.dataset && e.target.dataset.key; if (k) S.view[k] = e.target.open; }, true);
     $('#dw-body').addEventListener('keydown', e => {
       if (e.key !== 'Enter') return;
       if (e.target.id === 'dw-q') { e.preventDefault(); drawerSearch(S.view.cur); }
