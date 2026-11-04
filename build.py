@@ -32,14 +32,17 @@ DOCS = os.path.join(HERE, "docs")
 NHAN_VIEN = os.path.join(HERE, "dist", "nhan_vien")
 SHARED_FILES = ["crypto-web.js", "secure.js", "secure-ui.js", "secure-ui.css", "gate.css"]
 DXG = os.path.join(HERE, "modules", "de_xuat_gia")
-DXG_JS = ["pricing.js", "xlsx-io.js", "dxg-app.js"]
+DXG_JS = ["pricing.js", "xlsx-io.js", "cloud.js", "dxg-app.js"]
 # Mặc định chỉ admin — đúng chính sách "nhân viên chỉ tra cứu, không xuất". Bản nhân viên không chứa module.
 DXG_CHO_NHAN_VIEN = False
 
 # Chính sách nội dung: trang chỉ được tải mã từ chính site; không gọi mạng được (connect-src 'none'),
 # nên dữ liệu đã giải mã trong trang không gửi đi đâu được ngay cả khi có mã độc chèn vào.
-CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-       "connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'")
+SUPABASE_URL = "https://jzwmzpwcpjvhpylkhapg.supabase.co"
+CSP_MAU = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+           "connect-src {kn}; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'")
+CSP = CSP_MAU.format(kn="'none'")                       # bản nhân viên: không gọi mạng được
+CSP_ADMIN = CSP_MAU.format(kn=SUPABASE_URL)             # bản admin: chỉ đúng 1 domain Supabase (lưu kết quả Điền giá BOQ)
 
 CAM_TEN = re.compile(r"(^db\.js$|^doithu\.js$|^analysis\.js$|^ctg\.js$|\.dgbw$|\.enc$|\.xlsx$|^tai_khoan\.json$|^thong_tin\.json$)", re.I)
 CAM_NOI_DUNG = re.compile(r"window\.(DB|AN|DT|CTG)\s*=\s*\{")
@@ -80,9 +83,10 @@ def gan_cong_bao_ve(src, vai_tro, goc_shared):
     assert len(dung_scripts) >= 4, "index.html thiếu script ứng dụng (kiểm tra 3_WEB_OFFLINE/index.html)"
     assert "<script>" not in src, "index.html có script nội tuyến — không tương thích CSP"
     out = re.sub(r'<script src="assets/[^"]+"></script>\n?', "", src)
+    csp = CSP_ADMIN if vai_tro == "admin" else CSP
     head = ('<meta name="robots" content="noindex,nofollow">\n'
             '<meta name="referrer" content="no-referrer">\n'
-            f'<meta http-equiv="Content-Security-Policy" content="{CSP}">\n'
+            f'<meta http-equiv="Content-Security-Policy" content="{csp}">\n'
             f'<link rel="stylesheet" href="{goc_shared}/gate.css">\n'
             f'<link rel="stylesheet" href="{goc_shared}/secure-ui.css">\n')
     out = out.replace("</head>", head + "</head>", 1)
@@ -203,6 +207,8 @@ def main():
                 print(f"Bỏ qua {thu_muc}: chưa có bản dựng app tra cứu (chạy python build.py đầy đủ trước).")
                 continue
             html = open(idx, encoding="utf-8", newline="").read()
+            csp = CSP_ADMIN if vai_tro == "admin" else CSP
+            html = re.sub(r'(<meta http-equiv="Content-Security-Policy" content=")[^"]*(")', lambda m: m.group(1) + csp + m.group(2), html, count=1)
             with open(idx, "w", encoding="utf-8", newline="") as fh:
                 fh.write(gan_dien_gia(html, thu_muc, vai_tro))
             kiem_tra_dau_ra(thu_muc)

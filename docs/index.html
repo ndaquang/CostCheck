@@ -8,10 +8,10 @@
 <link rel="stylesheet" href="assets/dash.css?v=10">
 <meta name="robots" content="noindex,nofollow">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://jzwmzpwcpjvhpylkhapg.supabase.co; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="stylesheet" href="shared/gate.css">
 <link rel="stylesheet" href="shared/secure-ui.css">
-<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v=336bd2f1"><!--/DXG-->
+<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v=33abd4f4"><!--/DXG-->
 </head>
 <body>
 <div id="splash">
@@ -180,6 +180,25 @@
         <span class="fname" id="n-sess"></span>
       </label>
     </div>
+    <div class="cloud" id="cloud" hidden>
+      <b>Lưu đám mây (Supabase)</b>
+      <span class="muted small">Mỗi dự án có lịch sử phiên bản; tự lưu khi có thay đổi, không ghi đè bản cũ.</span>
+      <div id="cl-login">
+        <input type="email" id="cl-mail" placeholder="Email admin Supabase" autocomplete="username">
+        <input type="password" id="cl-pass" placeholder="Mật khẩu" autocomplete="current-password">
+        <button class="btn" id="cl-in">Đăng nhập</button>
+      </div>
+      <div id="cl-main" hidden>
+        <span id="cl-who" class="muted small"></span>
+        <select id="cl-proj"></select>
+        <button class="btn" id="cl-new">Dự án mới…</button>
+        <button class="btn" id="cl-save">Lưu ngay</button>
+        <select id="cl-vers" title="Khôi phục phiên bản"></select>
+        <button class="btn" id="cl-restore">Khôi phục</button>
+        <button class="btn" id="cl-out">Đăng xuất</button>
+        <span id="cl-st" class="muted small"></span>
+      </div>
+    </div>
     <div class="msg" id="load-msg" hidden></div>
   </section>
 
@@ -250,6 +269,6 @@
   <div id="dw-body"></div>
 </aside></template><!--/DXG-->
 <script src="shared/crypto-web.js"></script>
-<script src="shared/secure.js" data-build="admin" data-scripts="shared/secure-ui.js,assets/xlsx-lite.js?v=10,assets/charts.js?v=10,assets/dash.js?v=10,assets/dxg/pricing.js?v=336bd2f1,assets/app.js?v=10,assets/dxg/xlsx-io.js?v=336bd2f1,assets/dxg/dxg-app.js?v=336bd2f1"></script>
+<script src="shared/secure.js" data-build="admin" data-scripts="shared/secure-ui.js,assets/xlsx-lite.js?v=10,assets/charts.js?v=10,assets/dash.js?v=10,assets/dxg/pricing.js?v=33abd4f4,assets/app.js?v=10,assets/dxg/xlsx-io.js?v=33abd4f4,assets/dxg/cloud.js?v=33abd4f4,assets/dxg/dxg-app.js?v=33abd4f4"></script>
 </body>
 </html>

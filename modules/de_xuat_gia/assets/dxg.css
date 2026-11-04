@@ -202,3 +202,8 @@ td.desc .note { font-size: 12px; color: var(--accent); margin-top: 2px; }
 .opts .opt { text-align: left; align-items: stretch; }
 .opts .opt.chk { align-items: flex-start; }
 .opts .opt.chk label { display: flex; gap: 6px; align-items: center; justify-content: flex-start; }
+
+/* Lưu đám mây (Supabase) */
+.cloud{margin:12px 0;padding:10px 12px;border:1px solid var(--line,#d0d7de);border-radius:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.cloud input,.cloud select{padding:5px 8px;max-width:220px}
+.cloud[hidden],.cloud [hidden]{display:none}
