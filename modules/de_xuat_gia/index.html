@@ -71,11 +71,12 @@
     </div>
     <div class="cloud" id="cloud" hidden>
       <b>Lưu đám mây (Supabase)</b>
-      <span class="muted small">Mỗi dự án có lịch sử phiên bản; tự lưu khi có thay đổi, không ghi đè bản cũ.</span>
-      <div id="cl-login">
-        <input type="email" id="cl-mail" placeholder="Email admin Supabase" autocomplete="username">
-        <input type="password" id="cl-pass" placeholder="Mật khẩu" autocomplete="current-password">
-        <button class="btn" id="cl-in">Đăng nhập</button>
+      <span class="muted small">Tự kết nối theo đăng nhập gói admin. Mỗi dự án có lịch sử phiên bản; tự lưu khi có thay đổi, không ghi đè bản cũ.</span>
+      <span id="cl-st" class="muted small"></span>
+      <div id="cl-login" hidden>
+        <input type="email" id="cl-mail" placeholder="Email Supabase admin" autocomplete="username">
+        <input type="password" id="cl-pass" placeholder="Mật khẩu Supabase hiện tại (chỉ nhập 1 lần)" autocomplete="current-password">
+        <button class="btn" id="cl-in">Liên kết</button>
       </div>
       <div id="cl-main" hidden>
         <span id="cl-who" class="muted small"></span>
@@ -84,8 +85,6 @@
         <button class="btn" id="cl-save">Lưu ngay</button>
         <select id="cl-vers" title="Khôi phục phiên bản"></select>
         <button class="btn" id="cl-restore">Khôi phục</button>
-        <button class="btn" id="cl-out">Đăng xuất</button>
-        <span id="cl-st" class="muted small"></span>
       </div>
     </div>
     <div class="msg" id="load-msg" hidden></div>

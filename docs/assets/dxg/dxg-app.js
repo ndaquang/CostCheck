@@ -15,6 +15,20 @@
   const pct = v => (v === null || v === undefined || !isFinite(v)) ? '' : (v > 0 ? '+' : '') + (v * 100).toFixed(1) + '%';
   const esc = s => s === null || s === undefined ? '' : String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isNum = v => typeof v === 'number' && isFinite(v);
+  // Ô nhập giá: hiển thị 1.250.000 (chấm = hàng nghìn/triệu, phẩy = thập phân), lưu số thật
+  const moneyText = v => { if (!isNum(v)) return ''; const [i, d] = String(v).split('.'); return i.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (d ? ',' + d : ''); };
+  const moneyParse = t => { t = String(t).trim(); if (t === '') return null; const n = +t.replace(/\./g, '').replace(',', '.'); return isFinite(n) ? n : null; };
+  function moneyLive(el) {
+    const before = el.value.slice(0, el.selectionStart).replace(/[^\d,]/g, '').length;
+    let t = el.value.replace(/[^\d,]/g, ''); const k = t.indexOf(',');
+    if (k >= 0) t = t.slice(0, k + 1) + t.slice(k + 1).replace(/,/g, '');
+    const [i, d] = t.split(',');
+    let out = i.replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    if (d !== undefined) out += ',' + d;
+    el.value = out;
+    let n = 0, pos = 0; while (pos < out.length && n < before) { if (/[\d,]/.test(out[pos])) n++; pos++; }
+    el.setSelectionRange(pos, pos);
+  }
   const ROLE = (window.SECURE && window.SECURE.role) || 'admin';
   const ADMIN = ROLE === 'admin';
   const FIT = { cao: 'Cao', tb: 'Trung bình', thap: 'Thấp', none: 'Không khớp' };
@@ -759,8 +773,8 @@
       <details class="dw-more"${S.view.dwMore ? ' open' : ''} data-key="dwMore"><summary>Đánh giá & kiểm tra${flags.length ? ` <span class="warn small">· ${esc(flags.join(' · '))}</span>` : ''}</summary>
         <div class="kv">${kv2.map(([k, v]) => `<div>${k}</div><div>${v}</div>`).join('')}</div></details>
       <h4>Điều chỉnh</h4>
-      <div class="row-in"><label for="dw-manual">Giá điền tay</label><input type="number" id="dw-manual" step="any" value="${isNum(it.manual) ? it.manual : ''}" placeholder="${fmt(c.best)}">
-        <label for="dw-base">Baseline</label><input type="number" id="dw-base" step="any" value="${isNum(it.baseManual) ? it.baseManual : ''}" placeholder="${isNum(it.baseFile ?? it.baseCol) ? fmt(it.baseFile ?? it.baseCol) : 'nhập giá'}">
+      <div class="row-in"><label for="dw-manual">Giá điền tay</label><input type="text" inputmode="decimal" autocomplete="off" id="dw-manual" value="${moneyText(it.manual)}" placeholder="${fmt(c.best)}">
+        <label for="dw-base">Baseline</label><input type="text" inputmode="decimal" autocomplete="off" id="dw-base" value="${moneyText(it.baseManual)}" placeholder="${isNum(it.baseFile ?? it.baseCol) ? fmt(it.baseFile ?? it.baseCol) : 'nhập giá'}">
         <label><input type="checkbox" id="dw-skip"${it.skip ? ' checked' : ''}> Không điền dòng này</label>
         <button class="btn sm primary" data-do="apply">Lưu & sang dòng sau</button></div>
       <textarea id="dw-note" rows="1" placeholder="Ghi chú cho dòng này (không ghi vào file BOQ)">${esc(it.note)}</textarea>
@@ -796,7 +810,7 @@
     const act = e.target.dataset && e.target.dataset.do;
     if (act === 'apply') {
       const m = $('#dw-manual').value.trim(), b = $('#dw-base').value.trim();
-      it.manual = m === '' ? null : +m; it.baseManual = b === '' ? null : +b; it.note = $('#dw-note').value.trim(); it.skip = $('#dw-skip').checked;
+      it.manual = moneyParse(m); it.baseManual = moneyParse(b); it.note = $('#dw-note').value.trim(); it.skip = $('#dw-skip').checked;
       return done(it);
     }
     if (act === 'unsel') { it.sel = -1; return refreshItem(it); }
@@ -1051,6 +1065,7 @@
     $('#tab-audit').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) openDrawer(S.items.find(it => it.id === tr.dataset.id)); });
     $('#dw-close').addEventListener('click', closeDrawer);
     $('#dw-body').addEventListener('click', drawerAction);
+    $('#dw-body').addEventListener('input', e => { if (e.target.id === 'dw-manual' || e.target.id === 'dw-base') moneyLive(e.target); });
     $('#dw-body').addEventListener('change', e => {
       if (e.target.id === 'dw-auto') { try { localStorage.setItem(AUTO_KEY, e.target.checked ? '1' : '0'); } catch (ex) { /* không lưu được thì thôi */ } }
     });
@@ -1081,12 +1096,22 @@
   }
 
   /* ---------- Lưu đám mây (Supabase): theo dự án, mỗi lần lưu là một phiên bản ---------- */
+  // Không có đăng nhập riêng: mật khẩu Supabase được dẫn xuất từ mật khẩu đăng nhập gói admin (SECURE.cloudSecret).
+  // Lần đầu (hoặc sau khi đổi mật khẩu gói) chỉ cần "Liên kết" một lần với email + mật khẩu Supabase hiện có.
   function initCloud() {
     const box = $('#cloud');
-    if (!box || !window.DXGCloud || !EMBED || !ADMIN) return;   // chỉ bản admin nhúng trong app
+    const secretFn = window.SECURE && window.SECURE.cloudSecret;
+    if (!box || !window.DXGCloud || !EMBED || !ADMIN || !secretFn) return;   // chỉ bản admin nhúng trong app
     const C = window.DXGCloud, st = t => { $('#cl-st').textContent = t; };
+    const MAILKEY = 'dxg_cloud_email';
+    const getMail = () => { try { return localStorage.getItem(MAILKEY) || ''; } catch (e) { return ''; } };
+    const setMail = m => { try { localStorage.setItem(MAILKEY, m); } catch (e) { /* bỏ qua */ } };
     let last = '', lastAt = 0, busy = false;
     box.hidden = false;
+    const ready = async () => {
+      $('#cl-login').hidden = true; $('#cl-main').hidden = false; $('#cl-who').textContent = C.email; st('');
+      await fillProjects();
+    };
     const fillProjects = async sel => {
       const ps = await C.listProjects();
       $('#cl-proj').innerHTML = '<option value="">— chọn dự án —</option>' + ps.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
@@ -1108,12 +1133,23 @@
       catch (e) { st('Lỗi lưu: ' + (e.message || e)); }
       busy = false;
     };
+    // Tự đăng nhập; nếu chưa liên kết thì hiện ô liên kết một lần
+    (async () => {
+      const mail = getMail();
+      $('#cl-mail').value = mail;
+      if (mail) {
+        try { st('Đang kết nối Supabase…'); await C.login(mail, await secretFn()); return await ready(); }
+        catch (e) { st('Chưa liên kết được tự động. Nhập mật khẩu Supabase hiện tại để liên kết lại.'); }
+      } else st('Liên kết một lần với tài khoản Supabase admin.');
+      $('#cl-login').hidden = false;
+    })();
     $('#cl-in').addEventListener('click', async () => {
-      try { st('Đang đăng nhập…'); await C.login($('#cl-mail').value.trim(), $('#cl-pass').value); $('#cl-pass').value = '';
-        $('#cl-login').hidden = true; $('#cl-main').hidden = false; $('#cl-who').textContent = C.email; st(''); await fillProjects(); }
-      catch (e) { st(e.message || String(e)); }
+      try {
+        st('Đang liên kết…'); const mail = $('#cl-mail').value.trim();
+        await C.link(mail, $('#cl-pass').value, await secretFn()); $('#cl-pass').value = '';
+        setMail(mail); await ready();
+      } catch (e) { st(e.message || String(e)); }
     });
-    $('#cl-out').addEventListener('click', () => { C.logout(); $('#cl-main').hidden = true; $('#cl-login').hidden = false; st(''); });
     $('#cl-proj').addEventListener('change', () => fillVersions().catch(e => st(e.message)));
     $('#cl-new').addEventListener('click', async () => {
       const n = (prompt('Tên dự án:') || '').trim(); if (!n) return;

@@ -15,6 +15,15 @@
   let PKG = null;    // gói đã đọc: tài khoản + khối dữ liệu đã mã hóa
   let KEYS = null;   // khóa mở được sau đăng nhập, chỉ tồn tại trong bộ nhớ
   let fails = 0;
+  let CLOUD = null;  // mật khẩu Supabase dẫn xuất từ mật khẩu gói admin (chỉ trong bộ nhớ)
+
+  // PBKDF2-SHA256 (600.000 vòng, muối riêng) → 32 byte → base64url. Không gửi mật khẩu gói đi đâu cả.
+  async function khoaDamMay(matKhau, ten) {
+    const enc = new TextEncoder();
+    const nen = await crypto.subtle.importKey('raw', enc.encode(matKhau), 'PBKDF2', false, ['deriveBits']);
+    const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: enc.encode('dgbw-supabase|' + ten.toLowerCase()), iterations: 600000, hash: 'SHA-256' }, nen, 256));
+    return btoa(String.fromCharCode(...bits)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
 
   const splash = $('#splash');
   if (splash) splash.style.display = 'none';   // ẩn màn hình nạp dữ liệu cho tới khi đăng nhập xong
@@ -55,6 +64,7 @@
       if (BUILD === 'admin' && u.khoa.admin) keys.admin = await DGW.moKhoaBoc(u.khoa.admin, kek, `${u.ten_dang_nhap}|admin`);
 
       PKG = pkg; KEYS = keys;
+      if (keys.admin) CLOUD = await khoaDamMay(matKhau, u.ten_dang_nhap);   // trước khi xóa mật khẩu khỏi ô nhập
       $('#gate-pass').value = '';
       moGiaoDien(u, keys.admin ? 'admin' : 'nhan_vien');
     } catch (ex) {
@@ -75,6 +85,7 @@
       role,
       at: new Date().toISOString(),
       load: kind => layDuLieu(kind),
+      ...(role === 'admin' && CLOUD ? { cloudSecret: async () => CLOUD } : {}),
       logout: () => { KEYS = null; PKG = null; location.reload(); },
     };
     gate.remove();

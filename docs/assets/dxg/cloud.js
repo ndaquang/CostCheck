@@ -42,6 +42,13 @@
       try { role = (JSON.parse(atob(tok.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).app_metadata || {}).role || ''; } catch (e) { /* token lạ */ }
       if (role !== 'admin') { this.logout(); throw new Error('Tài khoản này chưa có vai trò admin trên Supabase. Nhờ quản trị cấp quyền rồi đăng nhập lại.'); }
     },
+    // Liên kết một lần: đăng nhập bằng mật khẩu Supabase hiện có, rồi đổi mật khẩu đó thành khóa dẫn xuất từ gói admin.
+    async link(mail, oldPass, secret) {
+      setSession(await raw('/auth/v1/token?grant_type=password', { method: 'POST', body: JSON.stringify({ email: mail, password: oldPass }) }));
+      await raw('/auth/v1/user', { method: 'PUT', body: JSON.stringify({ password: secret }) }, tok);
+      this.logout();
+      await this.login(mail, secret);
+    },
     logout() { tok = refresh = null; exp = 0; email = ''; },
     listProjects() { return rest('dxg_projects?select=id,name,created_at&archived=eq.false&order=name.asc'); },
     async createProject(name) {
