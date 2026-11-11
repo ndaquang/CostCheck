@@ -32,7 +32,7 @@ DOCS = os.path.join(HERE, "docs")
 NHAN_VIEN = os.path.join(HERE, "dist", "nhan_vien")
 SHARED_FILES = ["crypto-web.js", "secure.js", "secure-ui.js", "secure-ui.css", "gate.css"]
 DXG = os.path.join(HERE, "modules", "de_xuat_gia")
-DXG_JS = ["pricing.js", "xlsx-io.js", "cloud.js", "dxg-app.js"]
+DXG_JS = ["pricing.js", "price-lib.js", "xlsx-io.js", "cloud.js", "dxg-app.js"]
 # Mặc định chỉ admin — đúng chính sách "nhân viên chỉ tra cứu, không xuất". Bản nhân viên không chứa module.
 DXG_CHO_NHAN_VIEN = False
 

@@ -1095,6 +1095,59 @@
     if (S.items.length && S.items[0].c) renderTab();
   }
 
+  /* ---------- Kho đơn giá tra cứu: lưu sheet "PHAN TICH THEO MA" lên Supabase và tra cứu ---------- */
+  function initLib(C) {
+    const PL = window.PriceLib; if (!PL || !$('#step-lib')) return;
+    $('#step-lib').hidden = false;
+    const st = t => { $('#lib-st').textContent = t; };
+    let pending = null, rows = [], projects = [];
+    const refreshProjects = async () => {
+      projects = await C.listProjects();
+      $('#lib-projs').innerHTML = projects.map(p => `<option value="${esc(p.name)}">`).join('');
+      $('#lib-q-proj').innerHTML = '<option value="">Mọi dự án</option>' + projects.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    };
+    const render = () => {
+      const f = { q: $('#lib-q').value, unit: $('#lib-q-unit').value, min: $('#lib-min').value === '' ? null : +$('#lib-min').value, max: $('#lib-max').value === '' ? null : +$('#lib-max').value };
+      const pid = $('#lib-q-proj').value, pn = new Map(projects.map(p => [p.id, p.name]));
+      const ok = PL.filter(rows.filter(r => !pid || r.project_id === pid), f).sort((x, y) => x.description.localeCompare(y.description, 'vi'));
+      $('#lib-cnt').textContent = `${NF.format(ok.length)} / ${NF.format(rows.length)} dòng`;
+      $('#lib-tbl').innerHTML = '<tr><th>Dự án</th><th>Mô tả</th><th>Đơn vị</th><th>Đơn giá (VND)</th></tr>' + ok.slice(0, 300).map(r =>
+        `<tr><td>${esc(pn.get(r.project_id) || '')}</td><td>${esc(r.description)}</td><td>${esc(r.unit_norm || r.unit_raw)}${r.multi_unit ? ' <b title="Nhiều đơn vị: tra theo mô tả">⚑</b>' : ''}</td><td style="text-align:right">${fmt(r.unit_price)}</td></tr>`).join('')
+        + (ok.length > 300 ? `<tr><td colspan="4" class="muted small">Hiện 300 dòng đầu. Thu hẹp bộ lọc để xem thêm.</td></tr>` : '');
+    };
+    const load = async () => {
+      try {
+        st('Đang tải…'); rows = await C.loadPrices(); st('');
+        const us = [...new Set(rows.map(r => r.unit_norm).filter(Boolean))].sort();
+        $('#lib-q-unit').innerHTML = '<option value="">Mọi đơn vị</option><option value="__multi">⚑ Nhiều đơn vị</option>' + us.filter(u => !u.includes(',')).map(u => `<option>${esc(u)}</option>`).join('');
+        render();
+      } catch (e) { st('Lỗi tải: ' + (e.message || e)); }
+    };
+    $('#lib-file').addEventListener('change', async ev => {
+      const file = ev.target.files[0]; if (!file) return;
+      try {
+        const r = await PL.readWorkbook(await XLSXIO.read(await file.arrayBuffer()));
+        pending = { file: file.name, rows: r.rows };
+        const multi = r.rows.filter(x => x.multi_unit).length;
+        st(`${file.name}: ${NF.format(r.rows.length)} dòng hợp lệ (${multi} nhiều đơn vị, bỏ ${r.skipped} dòng tiêu đề/tổng).`);
+        $('#lib-save').disabled = !r.rows.length;
+      } catch (e) { pending = null; $('#lib-save').disabled = true; st(e.message || String(e)); }
+    });
+    $('#lib-save').addEventListener('click', async () => {
+      const name = $('#lib-proj').value.trim(); if (!pending || !name) { st('Nhập tên dự án và chọn file.'); return; }
+      if (!confirm(`Lưu ${pending.rows.length} dòng vào dự án "${name}" trên Supabase?`)) return;
+      $('#lib-save').disabled = true;
+      try {
+        const p = await C.ensureProject(name); const r = await C.savePrices(p.id, pending.file, pending.rows);
+        st(`Đã lưu ${NF.format(r.count)} dòng vào "${name}". Tải lại trang để nguồn "Kho giá" hiện trong Tra cứu.`); pending = null;
+        await refreshProjects(); $('#lib-q-proj').value = p.id; await load();
+      } catch (e) { st('Lỗi lưu: ' + (e.message || e)); $('#lib-save').disabled = false; }
+    });
+    ['#lib-q-proj', '#lib-q-unit'].forEach(s => $(s).addEventListener('change', render));
+    ['#lib-q', '#lib-min', '#lib-max'].forEach(s => $(s).addEventListener('input', render));
+    return async () => { await refreshProjects(); await load(); };
+  }
+
   /* ---------- Lưu đám mây (Supabase): theo dự án, mỗi lần lưu là một phiên bản ---------- */
   // Không có đăng nhập riêng: mật khẩu Supabase được dẫn xuất từ mật khẩu đăng nhập gói admin (SECURE.cloudSecret).
   // Lần đầu (hoặc sau khi đổi mật khẩu gói) chỉ cần "Liên kết" một lần với email + mật khẩu Supabase hiện có.
@@ -1108,9 +1161,11 @@
     const setMail = m => { try { localStorage.setItem(MAILKEY, m); } catch (e) { /* bỏ qua */ } };
     let last = '', lastAt = 0, busy = false;
     box.hidden = false;
+    const libStart = initLib(C);
     const ready = async () => {
       $('#cl-login').hidden = true; $('#cl-main').hidden = false; $('#cl-who').textContent = C.email; st('');
       await fillProjects();
+      if (libStart) libStart().catch(e => st('Kho giá: ' + (e.message || e)));
     };
     const fillProjects = async sel => {
       const ps = await C.listProjects();

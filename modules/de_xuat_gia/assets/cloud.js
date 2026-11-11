@@ -61,6 +61,28 @@
       return r[0];
     },
     listVersions(projectId) { return rest(`dxg_versions?select=id,version,file_name,item_count,created_at&project_id=eq.${encodeURIComponent(projectId)}&order=version.desc&limit=50`); },
+    // ---- Kho đơn giá tra cứu (sheet "PHAN TICH THEO MA"): mỗi lần lưu là một lô mới, không ghi đè ----
+    async ensureProject(name) {
+      const ps = await this.listProjects(), k = String(name).trim().toLowerCase();
+      return ps.find(p => p.name.trim().toLowerCase() === k) || this.createProject(String(name).trim());
+    },
+    async savePrices(projectId, fileName, rows) {
+      const batch = (crypto.randomUUID && crypto.randomUUID()) || ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+      for (let i = 0; i < rows.length; i += 400) {
+        const part = rows.slice(i, i + 400).map(r => ({ project_id: projectId, batch_id: batch, source_file: fileName, description: r.description, desc_search: r.desc_search,
+          unit_raw: r.unit_raw, unit_norm: r.unit_norm, multi_unit: r.multi_unit, unit_price: r.unit_price }));
+        await rest('dxg_price_lookup', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(part) });
+      }
+      return { batch, count: rows.length };
+    },
+    // Lô mới nhất của mỗi dự án (phân trang 1000 dòng); projectId rỗng = mọi dự án
+    async loadPrices(projectId) {
+      const out = [], flt = projectId ? '&project_id=eq.' + encodeURIComponent(projectId) : '';
+      for (let off = 0; ; off += 1000) {
+        const part = await rest('dxg_price_lookup_latest?select=id,project_id,description,desc_search,unit_raw,unit_norm,multi_unit,unit_price,source_file,created_at&order=id.asc&limit=1000&offset=' + off + flt);
+        out.push(...part); if (part.length < 1000) return out;
+      }
+    },
     async getVersion(id) { const r = await rest(`dxg_versions?select=payload&id=eq.${encodeURIComponent(id)}`); return r[0] && r[0].payload; },
   };
 })();
