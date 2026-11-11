@@ -35,9 +35,10 @@ const DS_RIENG = {
 const NGUON_PHU = [
   { label: 'CTG', khoi: 'ctg', file: 'data/ctg.js', bien: 'CTG' },
   { label: 'Đối thủ', khoi: 'doithu', file: 'data/doithu.js', bien: 'DT', anTraCuu: true },
+  { label: 'Kho giá', khoi: 'kho', kho: true },   // đơn giá do admin lưu trên Supabase (sheet "PHAN TICH THEO MA"), tải sau khi đăng nhập gói admin
 ];
-const NGUON_THU_TU = ['Nội bộ', 'CTG', 'Đối thủ'];   // thứ tự hiện các nguồn
-const SRC_COLOR = { 'Nội bộ': 'var(--series-1)', 'CTG': 'var(--series-2)', 'Đối thủ': 'var(--series-3)' };
+const NGUON_THU_TU = ['Nội bộ', 'CTG', 'Đối thủ', 'Kho giá'];   // thứ tự hiện các nguồn
+const SRC_COLOR = { 'Nội bộ': 'var(--series-1)', 'CTG': 'var(--series-2)', 'Đối thủ': 'var(--series-3)', 'Kho giá': 'var(--series-4)' };
 const srcOf = i => C.ng && C.ng[i] >= 0 ? D.ng[C.ng[i]] : 'Nội bộ';
 const srcTag = i => { const s = srcOf(i); return s !== 'Nội bộ' ? `<span class="tag src${s === 'Đối thủ' ? ' src-dt' : ''}" title="Nguồn dữ liệu: ${esc(s)}">${esc(s)}</span>` : ''; };
 const DS_URL = new URLSearchParams(location.search).get('ds');
@@ -74,6 +75,19 @@ function loadData(ds) {
   const R = DS_RIENG[ds];
   return R ? loadBlock(R.khoi, R.file, R.bien) : loadBlock('db', 'data/db.js', 'DB').then(gopNguonPhu);
 }
+// Nguồn "Kho giá": đọc lô đơn giá mới nhất của mọi dự án từ Supabase (cần module Điền giá BOQ: cloud.js, price-lib.js, và đã liên kết Supabase).
+// Không có / chưa liên kết / lỗi mạng thì bỏ qua (status 'none'), app vẫn chạy với các nguồn còn lại.
+async function loadKho() {
+  const thieu = m => Object.assign(new Error(m), { code: 'THIEU_KHOI' });
+  for (let k = 0; k < 40 && !(window.DXGCloud && window.PriceLib); k++) await new Promise(r => setTimeout(r, 100));   // các script module nạp sau app.js
+  const Cl = window.DXGCloud, PL = window.PriceLib, sec = window.SECURE && window.SECURE.cloudSecret;
+  if (!Cl || !PL || !sec) throw thieu('Chưa có module Supabase');
+  let mail = ''; try { mail = localStorage.getItem('dxg_cloud_email') || ''; } catch (e) { }
+  if (!Cl.signedIn) { if (!mail) throw thieu('Chưa liên kết Supabase'); try { await Cl.login(mail, await sec()); } catch (e) { throw thieu('Không đăng nhập được Supabase'); } }
+  const [rows, projects] = await Promise.all([Cl.loadPrices(), Cl.listProjects()]);
+  if (!rows.length) throw thieu('Kho giá trống');
+  return PL.toDB(rows, projects);
+}
 // Gộp nguồn phụ vào dữ liệu nội bộ (chỉ admin; cần pricing.js của module Điền giá BOQ, nạp trước app.js).
 // Khối không có trong gói / không có file data/*.js thì bỏ qua; nguồn đã có trong khối db (vd CTG) thì không gộp lần nữa.
 async function gopNguonPhu(db) {
@@ -85,7 +99,7 @@ async function gopNguonPhu(db) {
   for (const n of NGUON_PHU) {
     if (X.hasSource(db, n.label)) { PHU.push({ label: n.label, status: 'co_san' }); continue; }
     let src;
-    try { src = await loadBlock(n.khoi, n.file, n.bien); }
+    try { src = n.kho ? await loadKho() : await loadBlock(n.khoi, n.file, n.bien); }
     catch (e) { PHU.push({ label: n.label, status: e && (e.code === 'THIEU_KHOI' || e.code === 'THIEU_FILE') ? 'none' : 'loi', why: String(e && e.message || e) }); continue; }
     if (!src || !src.cols || !Array.isArray(src.cols.name) || !src.count) { PHU.push({ label: n.label, status: 'format' }); continue; }
     PHU.push({ label: n.label, status: 'ok', ...X.mergeDB(db, src, n.label) });
