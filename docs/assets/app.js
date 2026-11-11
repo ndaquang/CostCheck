@@ -83,6 +83,7 @@ async function loadKho() {
   const Cl = window.DXGCloud, PL = window.PriceLib, sec = window.SECURE && window.SECURE.cloudSecret;
   if (!Cl || !PL || !sec) throw thieu('Chưa có module Supabase');
   let mail = ''; try { mail = localStorage.getItem('dxg_cloud_email') || ''; } catch (e) { }
+  if (!mail && /@/.test(window.SECURE.user || '')) mail = window.SECURE.user;   // tên đăng nhập gói admin là email thì dùng luôn
   if (!Cl.signedIn) { if (!mail) throw thieu('Chưa liên kết Supabase'); try { await Cl.login(mail, await sec()); } catch (e) { throw thieu('Không đăng nhập được Supabase'); } }
   const [rows, projects] = await Promise.all([Cl.loadPrices(), Cl.listProjects()]);
   if (!rows.length) throw thieu('Kho giá trống');

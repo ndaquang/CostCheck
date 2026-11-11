@@ -1157,7 +1157,7 @@
     if (!box || !window.DXGCloud || !EMBED || !ADMIN || !secretFn) return;   // chỉ bản admin nhúng trong app
     const C = window.DXGCloud, st = t => { $('#cl-st').textContent = t; };
     const MAILKEY = 'dxg_cloud_email';
-    const getMail = () => { try { return localStorage.getItem(MAILKEY) || ''; } catch (e) { return ''; } };
+    const getMail = () => { let m = ''; try { m = localStorage.getItem(MAILKEY) || ''; } catch (e) { /* bỏ qua */ } return m || (/@/.test(window.SECURE.user || '') ? window.SECURE.user : ''); };   // mặc định: tên đăng nhập gói admin nếu là email
     const setMail = m => { try { localStorage.setItem(MAILKEY, m); } catch (e) { /* bỏ qua */ } };
     let last = '', lastAt = 0, busy = false;
     box.hidden = false;
