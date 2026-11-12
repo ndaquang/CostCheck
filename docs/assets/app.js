@@ -609,7 +609,8 @@ function renderChips() {
   $('#chips').innerHTML = chips.map(([t, v, k, l]) =>
     `<span class="chip">${k ? `<i>${esc(k)}:</i>` : ''}<span title="${esc(l)}">${esc(l)}</span><button data-chip="${t}" data-v="${esc(v)}" title="Bỏ lọc">✕</button></span>`).join('');
 }
-const PRIMARY = ['ng', 'nrm', 'u', 'y', 'type', 'prov25'];
+// Bộ lọc chính, hiện đúng thứ tự này; còn lại vào "Bộ lọc nâng cao". Bản nhân viên giữ bộ cũ.
+const PRIMARY = ROLE === 'nhan_vien' ? ['ng', 'nrm', 'u', 'y', 'type', 'prov25'] : ['ng', 'u', 'p', 'type', 'src', 'w'];
 function facetHtml(f, openState) {
   const open = f.key in openState ? openState[f.key] : (PRIMARY.includes(f.key) ? !!f.open : false) || f.sel.size > 0;
   let items = f.labels.map((l, v) => v).filter(v => f.counts[v] > 0 || f.sel.has(v));
@@ -635,7 +636,7 @@ function facetHtml(f, openState) {
 function renderFacets() {
   const openState = {};
   $$('details.facet[data-key]').forEach(d => openState[d.dataset.key] = d.open);
-  $('#facets').innerHTML = FACETS.filter(f => PRIMARY.includes(f.key)).map(f => facetHtml(f, openState)).join('');
+  $('#facets').innerHTML = PRIMARY.map(k => FACETS.find(f => f.key === k)).filter(Boolean).map(f => facetHtml(f, openState)).join('');
   $('#facets-adv').innerHTML = FACETS.filter(f => !PRIMARY.includes(f.key)).map(f => facetHtml(f, openState)).join('');
   const nAdv = FACETS.filter(f => !PRIMARY.includes(f.key)).reduce((a, f) => a + f.sel.size, 0) + (state.pmin !== null) + (state.pmax !== null) + state.split + state.nowarn + state.par;
   $('#adv-badge').textContent = nAdv || ''; $('#adv-badge').hidden = !nAdv;
