@@ -11,7 +11,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://jzwmzpwcpjvhpylkhapg.supabase.co; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="stylesheet" href="shared/gate.css">
 <link rel="stylesheet" href="shared/secure-ui.css">
-<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v=a82a4199"><!--/DXG-->
+<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v=1e4578b5"><!--/DXG-->
 </head>
 <body>
 <div id="splash">
@@ -204,7 +204,7 @@
   <!-- Kho đơn giá tra cứu (Supabase) -->
   <section class="card" id="step-lib" hidden>
     <h2>Kho đơn giá tra cứu (Supabase)</h2>
-    <p class="muted small">Nạp file tổng hợp có sheet <b>PHAN TICH THEO MA</b>. Chỉ lưu <b>mô tả, đơn vị, đơn giá</b>. Đơn vị có 2–3 đơn vị được đánh dấu "nhiều đơn vị" để tra theo mô tả. Mỗi lần lưu là một lô mới; tra cứu dùng lô mới nhất của dự án. Sau khi lưu, tải lại trang để nguồn <b>Kho giá</b> hiện trong bộ lọc "Nguồn dữ liệu" của Tra cứu.</p>
+    <p class="muted small">Nạp file tổng hợp có sheet <b>PHAN TICH THEO MA</b>. Chỉ lưu <b>mô tả, đơn vị, đơn giá</b>. Đơn vị có 2–3 đơn vị được đánh dấu "nhiều đơn vị" để tra theo mô tả. Mỗi lần lưu là một lô mới; tra cứu dùng lô mới nhất của dự án. Muốn xóa giá một dự án: chọn dự án ở ô lọc rồi bấm <b>Xóa giá dự án</b>. Sau khi lưu, tải lại trang để nguồn <b>Kho giá</b> hiện trong bộ lọc "Nguồn dữ liệu" của Tra cứu.</p>
     <div class="lib-row">
       <input id="lib-proj" list="lib-projs" placeholder="Tên dự án (vd: Dự án Gremsy)" value="Dự án Gremsy"><datalist id="lib-projs"></datalist>
       <label class="btn pick"><input type="file" id="lib-file" accept=".xlsx,.xlsm" hidden>Chọn file tổng hợp…</label>
@@ -213,6 +213,7 @@
     </div>
     <div class="lib-row">
       <select id="lib-q-proj"></select>
+      <button class="btn" id="lib-del" disabled title="Xóa toàn bộ đơn giá của dự án đang chọn">Xóa giá dự án</button>
       <input id="lib-q" placeholder="Tìm theo mô tả (không cần dấu)…">
       <select id="lib-q-unit"><option value="">Mọi đơn vị</option></select>
       <input id="lib-min" type="number" placeholder="Giá từ"><input id="lib-max" type="number" placeholder="đến">
@@ -288,6 +289,6 @@
   <div id="dw-body"></div>
 </aside></template><!--/DXG-->
 <script src="shared/crypto-web.js"></script>
-<script src="shared/secure.js" data-build="admin" data-scripts="shared/secure-ui.js,assets/xlsx-lite.js?v=10,assets/charts.js?v=10,assets/dash.js?v=10,assets/dxg/pricing.js?v=a82a4199,assets/app.js?v=10,assets/dxg/price-lib.js?v=a82a4199,assets/dxg/xlsx-io.js?v=a82a4199,assets/dxg/cloud.js?v=a82a4199,assets/dxg/dxg-app.js?v=a82a4199"></script>
+<script src="shared/secure.js" data-build="admin" data-scripts="shared/secure-ui.js,assets/xlsx-lite.js?v=10,assets/charts.js?v=10,assets/dash.js?v=10,assets/dxg/pricing.js?v=1e4578b5,assets/app.js?v=10,assets/dxg/price-lib.js?v=1e4578b5,assets/dxg/xlsx-io.js?v=1e4578b5,assets/dxg/cloud.js?v=1e4578b5,assets/dxg/dxg-app.js?v=1e4578b5"></script>
 </body>
 </html>
