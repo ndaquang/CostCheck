@@ -609,7 +609,8 @@ function renderChips() {
   $('#chips').innerHTML = chips.map(([t, v, k, l]) =>
     `<span class="chip">${k ? `<i>${esc(k)}:</i>` : ''}<span title="${esc(l)}">${esc(l)}</span><button data-chip="${t}" data-v="${esc(v)}" title="Bỏ lọc">✕</button></span>`).join('');
 }
-const PRIMARY = ['ng', 'u', 'p', 'type', 'src', 'w'];   // bộ lọc chính, hiện đúng thứ tự này; còn lại vào "Bộ lọc nâng cao"
+// Bộ lọc chính, hiện đúng thứ tự này; còn lại vào "Bộ lọc nâng cao". Bản nhân viên giữ bộ cũ.
+const PRIMARY = ROLE === 'nhan_vien' ? ['ng', 'nrm', 'u', 'y', 'type', 'prov25'] : ['ng', 'u', 'p', 'type', 'src', 'w'];
 function facetHtml(f, openState) {
   const open = f.key in openState ? openState[f.key] : (PRIMARY.includes(f.key) ? !!f.open : false) || f.sel.size > 0;
   let items = f.labels.map((l, v) => v).filter(v => f.counts[v] > 0 || f.sel.has(v));
