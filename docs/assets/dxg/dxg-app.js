@@ -189,6 +189,17 @@
     statCache = new Map();
     showMeta();
   }
+  // app tra cứu nạp lại dữ liệu (Kho giá vừa lưu / xóa): dựng lại CSDL của module từ window.DB mới, giữ đơn giá bổ sung và BOQ đang mở
+  document.addEventListener('cc:db-changed', () => {
+    if (!IX) return;
+    const sess = S.items.length ? sessionData() : null, ex = S.extra;
+    DBX = null; S.extra = []; S.sources = [];
+    const byFile = new Map(); for (const it of ex) { const k = it.file || 'bổ sung'; if (!byFile.has(k)) byFile.set(k, []); byFile.get(k).push(it); }
+    for (const [f, list] of byFile) addExtraRows(list, f);
+    rebuildIndex(); buildSourceOptions();
+    if (sess) rematch(sess);
+    loadSources();
+  });
   function init() {
     const t0 = performance.now();
     rebuildIndex();
@@ -1100,28 +1111,20 @@
     const PL = window.PriceLib; if (!PL || !$('#step-lib')) return;
     $('#step-lib').hidden = false;
     const st = t => { $('#lib-st').textContent = t; };
-    let pending = null, rows = [], projects = [];
-    const refreshProjects = async () => {
-      projects = await C.listProjects();
-      $('#lib-projs').innerHTML = projects.map(p => `<option value="${esc(p.name)}">`).join('');
-      $('#lib-q-proj').innerHTML = '<option value="">Mọi dự án</option>' + projects.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+    let pending = null, projects = [], counts = new Map();
+    const refresh = async () => {
+      const [ps, rows] = await Promise.all([C.listProjects(), C.loadPrices()]);
+      counts = new Map(); for (const r of rows) counts.set(r.project_id, (counts.get(r.project_id) || 0) + 1);
+      projects = ps.filter(p => counts.has(p.id));
+      $('#lib-projs').innerHTML = ps.map(p => `<option value="${esc(p.name)}">`).join('');
+      $('#lib-q-proj').innerHTML = `<option value="">— dự án đã lưu (${projects.length}) —</option>` + projects.map(p => `<option value="${p.id}">${esc(p.name)} · ${NF.format(counts.get(p.id))} dòng</option>`).join('');
+      $('#lib-del').disabled = true;
     };
-    const render = () => {
-      const f = { q: $('#lib-q').value, unit: $('#lib-q-unit').value, min: $('#lib-min').value === '' ? null : +$('#lib-min').value, max: $('#lib-max').value === '' ? null : +$('#lib-max').value };
-      const pid = $('#lib-q-proj').value, pn = new Map(projects.map(p => [p.id, p.name]));
-      const ok = PL.filter(rows.filter(r => !pid || r.project_id === pid), f).sort((x, y) => x.description.localeCompare(y.description, 'vi'));
-      $('#lib-cnt').textContent = `${NF.format(ok.length)} / ${NF.format(rows.length)} dòng`;
-      $('#lib-tbl').innerHTML = '<tr><th>Dự án</th><th>Mô tả</th><th>Đơn vị</th><th>Đơn giá (VND)</th></tr>' + ok.slice(0, 300).map(r =>
-        `<tr><td>${esc(pn.get(r.project_id) || '')}</td><td>${esc(r.description)}</td><td>${esc(r.unit_norm || r.unit_raw)}${r.multi_unit ? ' <b title="Nhiều đơn vị: tra theo mô tả">⚑</b>' : ''}</td><td style="text-align:right">${fmt(r.unit_price)}</td></tr>`).join('')
-        + (ok.length > 300 ? `<tr><td colspan="4" class="muted small">Hiện 300 dòng đầu. Thu hẹp bộ lọc để xem thêm.</td></tr>` : '');
-    };
-    const load = async () => {
-      try {
-        st('Đang tải…'); rows = await C.loadPrices(); st('');
-        const us = [...new Set(rows.map(r => r.unit_norm).filter(Boolean))].sort();
-        $('#lib-q-unit').innerHTML = '<option value="">Mọi đơn vị</option><option value="__multi">⚑ Nhiều đơn vị</option>' + us.filter(u => !u.includes(',')).map(u => `<option>${esc(u)}</option>`).join('');
-        render();
-      } catch (e) { st('Lỗi tải: ' + (e.message || e)); }
+    // cập nhật nguồn Kho giá trong app (Tra cứu, Điểm rơi giá, Phân tích, Điền giá BOQ)
+    const apDung = async () => {
+      if (!window.CostCheck) return ' Tải lại trang để áp dụng.';
+      const r = await window.CostCheck.napLaiKho();
+      return r.status === 'ok' ? ` Nguồn Kho giá đang dùng ${NF.format(r.dong)} dòng.` : r.status === 'none' ? ' Kho giá hiện trống.' : ` Chưa cập nhật được nguồn Kho giá (${r.why}).`;
     };
     $('#lib-file').addEventListener('change', async ev => {
       const file = ev.target.files[0]; if (!file) return;
@@ -1132,6 +1135,7 @@
         st(`${file.name}: ${NF.format(r.rows.length)} dòng hợp lệ (${multi} nhiều đơn vị, bỏ ${r.skipped} dòng tiêu đề/tổng).`);
         $('#lib-save').disabled = !r.rows.length;
       } catch (e) { pending = null; $('#lib-save').disabled = true; st(e.message || String(e)); }
+      ev.target.value = '';
     });
     $('#lib-save').addEventListener('click', async () => {
       const name = $('#lib-proj').value.trim(); if (!pending || !name) { st('Nhập tên dự án và chọn file.'); return; }
@@ -1139,22 +1143,20 @@
       $('#lib-save').disabled = true;
       try {
         const p = await C.ensureProject(name); const r = await C.savePrices(p.id, pending.file, pending.rows);
-        st(`Đã lưu ${NF.format(r.count)} dòng vào "${name}". Tải lại trang để nguồn "Kho giá" hiện trong Tra cứu.`); pending = null;
-        await refreshProjects(); $('#lib-q-proj').value = p.id; await load();
-      } catch (e) { st('Lỗi lưu: ' + (e.message || e)); $('#lib-save').disabled = false; }
+        pending = null; st(`Đã lưu ${NF.format(r.count)} dòng vào "${name}". Đang cập nhật nguồn Kho giá…`);
+        const t = await apDung(); await refresh();
+        st(`Đã lưu ${NF.format(r.count)} dòng vào "${name}".` + t);
+      } catch (e) { st('Lỗi lưu: ' + (e.message || e)); $('#lib-save').disabled = !pending; }
     });
     $('#lib-q-proj').addEventListener('change', () => { $('#lib-del').disabled = !$('#lib-q-proj').value; });
     $('#lib-del').addEventListener('click', async () => {
       const pid = $('#lib-q-proj').value, p = projects.find(x => x.id === pid); if (!p) return;
-      const n = rows.filter(r => r.project_id === pid).length;
-      if (!confirm(`Xóa toàn bộ đơn giá của dự án "${p.name}" (${NF.format(n)} dòng đang dùng, kể cả các lô cũ) khỏi Supabase?\nKhông hoàn tác được.`)) return;
+      if (!confirm(`Xóa toàn bộ đơn giá của dự án "${p.name}" (${NF.format(counts.get(pid) || 0)} dòng, kể cả các lô cũ) khỏi Supabase?\nKhông hoàn tác được.`)) return;
       $('#lib-del').disabled = true;
-      try { const k = await C.deletePrices(pid); st(`Đã xóa ${NF.format(k)} dòng của "${p.name}". Tải lại trang để nguồn Kho giá cập nhật.`); $('#lib-q-proj').value = ''; await load(); }
+      try { const k = await C.deletePrices(pid); const t = await apDung(); await refresh(); st(`Đã xóa ${NF.format(k)} dòng của "${p.name}".` + t); }
       catch (e) { st('Lỗi xóa: ' + (e.message || e)); $('#lib-del').disabled = false; }
     });
-    ['#lib-q-proj', '#lib-q-unit'].forEach(s => $(s).addEventListener('change', render));
-    ['#lib-q', '#lib-min', '#lib-max'].forEach(s => $(s).addEventListener('input', render));
-    return async () => { await refreshProjects(); await load(); };
+    return refresh;
   }
 
   /* ---------- Lưu đám mây (Supabase): theo dự án, mỗi lần lưu là một phiên bản ---------- */

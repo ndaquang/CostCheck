@@ -98,9 +98,10 @@ async function gopNguonPhu(db) {
   db.nguonPhu = PHU = [];
   if (Array.isArray(db.cols.ng)) X.tagSource(db, 'Nội bộ');   // dòng chưa ghi nguồn = Nội bộ
   for (const n of NGUON_PHU) {
+    if (n.kho) { db.khoMoc = { n: db.count, p: (db.projects || []).length, d: Object.fromEntries(Object.entries(db.dicts).filter(([, v]) => Array.isArray(v)).map(([k, v]) => [k, v.length])) }; await gopKho(db); continue; }
     if (X.hasSource(db, n.label)) { PHU.push({ label: n.label, status: 'co_san' }); continue; }
     let src;
-    try { src = n.kho ? await loadKho() : await loadBlock(n.khoi, n.file, n.bien); }
+    try { src = await loadBlock(n.khoi, n.file, n.bien); }
     catch (e) { PHU.push({ label: n.label, status: e && (e.code === 'THIEU_KHOI' || e.code === 'THIEU_FILE') ? 'none' : 'loi', why: String(e && e.message || e) }); continue; }
     if (!src || !src.cols || !Array.isArray(src.cols.name) || !src.count) { PHU.push({ label: n.label, status: 'format' }); continue; }
     PHU.push({ label: n.label, status: 'ok', ...X.mergeDB(db, src, n.label) });
@@ -108,6 +109,36 @@ async function gopNguonPhu(db) {
   console.info('Nguồn dữ liệu:', PHU.map(x => `${x.label} ${x.status}${x.dong ? ` (${x.dong} dòng)` : ''}`).join(', '));
   return db;
 }
+// Kho giá gộp sau cùng nên các dòng của nó nằm cuối CSDL (từ mốc khoMoc): nạp lại = cắt về mốc rồi gộp lô mới nhất.
+async function gopKho(db) {
+  const L = 'Kho giá', m = db.khoMoc, C = db.cols;
+  for (const k of Object.keys(C)) if (Array.isArray(C[k])) C[k].length = m.n;
+  db.count = m.n;
+  if (db.projects) db.projects.length = m.p;
+  for (const k of Object.keys(db.dicts)) if (Array.isArray(db.dicts[k])) db.dicts[k].length = m.d[k] || 0;   // từ điển chỉ được nối thêm khi gộp
+  PHU = db.nguonPhu = db.nguonPhu.filter(x => x.label !== L);
+  let r;
+  try { const src = await loadKho(); r = { label: L, status: 'ok', ...window.DXG.mergeDB(db, src, L) }; }
+  catch (e) { r = { label: L, status: e && e.code === 'THIEU_KHOI' ? 'none' : 'loi', why: String(e && e.message || e) }; }
+  PHU.push(r);
+  return r;
+}
+// Sau khi lưu / xóa giá dự án trên Supabase (mục Điền giá BOQ): cập nhật ngay Tra cứu, Điểm rơi giá, Phân tích, Điền giá BOQ.
+async function napLaiKho() {
+  const db = RAW.db;
+  if (!db || !db.khoMoc) throw new Error('Dữ liệu nội bộ chưa nạp nguồn phụ');
+  const r = await gopKho(db);
+  if (DS === 'noibo') {
+    useDB(db);
+    expCache.clear(); DROP.g = null; DROP.tops = {}; lastSearchQ = null;
+    run();
+    if (SECTION === 'diem-roi') renderDrop();
+  } else delete CACHE.noibo;
+  if (window.DASH && window.DASH.lamMoi) window.DASH.lamMoi();
+  document.dispatchEvent(new CustomEvent('cc:db-changed'));
+  return r;
+}
+window.CostCheck = { napLaiKho };
 const loiMo = (e, ds) => (e && e.code === 'THIEU_KHOI' && DS_RIENG[ds] && DS_RIENG[ds].thieu) || String(e && e.message || e);
 function boot() {
   if (window.SECURE) $('#splash-msg').textContent = 'Đang giải mã dữ liệu…';
