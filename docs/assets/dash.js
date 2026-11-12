@@ -209,7 +209,7 @@ TABS.labour = v => {
 // Tính ngay trên dữ liệu nội bộ đã gộp nguồn của app tra cứu (window.DB, cột ng "Nguồn dữ liệu"; đối thủ do app gộp khi nạp):
 // trong cùng nhóm đại diện, so trung vị giá quy về năm gốc của từng nguồn với Nội bộ. Bỏ dòng REVIEW và ngoại lai đã đánh dấu;
 // mỗi nguồn cần ≥ NG_MIN báo giá trong nhóm. Hệ số > 1 = nguồn đó đắt hơn Nội bộ.
-const NG_MIN = 3, NG_THU_TU = ['Nội bộ', 'CTG', 'Đối thủ'];
+const NG_MIN = 3, NG_THU_TU = ['Nội bộ', 'CTG', 'Đối thủ', 'Kho giá'];
 const NG = { db: null, kq: null, src: null, dir: 'cao' };
 const thuTu = (a, b) => ((NG_THU_TU.indexOf(a) + 1) || 99) - ((NG_THU_TU.indexOf(b) + 1) || 99);
 const heSo = r => '×' + (Math.round(r * 100) / 100).toLocaleString('vi-VN', { minimumFractionDigits: 2 });
@@ -470,5 +470,7 @@ TABS.algos = v => {
   v.onclick = e => { const a = e.target.closest('[data-go]'); if (a) { e.preventDefault(); show(a.dataset.go); } };
 };
 
-return { start };
+// dữ liệu nội bộ vừa đổi (nạp lại Kho giá): tính lại So sánh nguồn, vẽ lại thẻ đang mở
+function lamMoi() { NG.db = null; if (started && !$('#sec-analysis').hidden) show(cur); }
+return { start, lamMoi };
 })();

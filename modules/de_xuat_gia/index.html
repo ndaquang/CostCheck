@@ -92,23 +92,18 @@
 
   <!-- Kho đơn giá tra cứu (Supabase) -->
   <section class="card" id="step-lib" hidden>
-    <h2>Kho đơn giá tra cứu (Supabase)</h2>
-    <p class="muted small">Nạp file tổng hợp có sheet <b>PHAN TICH THEO MA</b>. Chỉ lưu <b>mô tả, đơn vị, đơn giá</b>. Đơn vị có 2–3 đơn vị được đánh dấu "nhiều đơn vị" để tra theo mô tả. Mỗi lần lưu là một lô mới; tra cứu dùng lô mới nhất của dự án. Muốn xóa giá một dự án: chọn dự án ở ô lọc rồi bấm <b>Xóa giá dự án</b>. Sau khi lưu, tải lại trang để nguồn <b>Kho giá</b> hiện trong bộ lọc "Nguồn dữ liệu" của Tra cứu.</p>
+    <h2>Lưu đơn giá dự án lên Supabase</h2>
+    <p class="muted small">Nạp file tổng hợp có sheet <b>PHAN TICH THEO MA</b>; chỉ lưu <b>mô tả, đơn vị, đơn giá</b>. Lưu xong, nguồn <b>Kho giá</b> được cập nhật ngay cho Tra cứu, Điểm rơi giá, Phân tích và Điền giá BOQ. Lưu lại cùng tên dự án sẽ thay giá cũ của dự án đó.</p>
     <div class="lib-row">
       <input id="lib-proj" list="lib-projs" placeholder="Tên dự án (vd: Dự án Gremsy)" value="Dự án Gremsy"><datalist id="lib-projs"></datalist>
       <label class="btn pick"><input type="file" id="lib-file" accept=".xlsx,.xlsm" hidden>Chọn file tổng hợp…</label>
       <button class="btn primary" id="lib-save" disabled>Lưu vào Supabase</button>
-      <span class="muted small" id="lib-st"></span>
     </div>
     <div class="lib-row">
       <select id="lib-q-proj"></select>
       <button class="btn" id="lib-del" disabled title="Xóa toàn bộ đơn giá của dự án đang chọn">Xóa giá dự án</button>
-      <input id="lib-q" placeholder="Tìm theo mô tả (không cần dấu)…">
-      <select id="lib-q-unit"><option value="">Mọi đơn vị</option></select>
-      <input id="lib-min" type="number" placeholder="Giá từ"><input id="lib-max" type="number" placeholder="đến">
-      <span class="muted small" id="lib-cnt"></span>
+      <span class="muted small" id="lib-st"></span>
     </div>
-    <div class="tbl-wrap"><table class="map" id="lib-tbl"></table></div>
   </section>
 
   <!-- Bước 2: cấu trúc -->

@@ -253,11 +253,10 @@ Mọi dữ liệu trong `tests/` là giả lập.
 5. **Mẫu báo cáo tư vấn** (PDF / Word) từ sheet đánh giá và ý kiến QS.
 6. **Add-in Excel** (phương án B): xem giá tham khảo ngay trong Excel khi chọn một dòng.
 
-## Kho đơn giá tra cứu (Supabase)
-Mục **"Kho đơn giá tra cứu"** (chỉ admin, sau khi đã liên kết Supabase) nạp file tổng hợp có sheet **PHAN TICH THEO MA**, chỉ lưu **mô tả, đơn vị, đơn giá** vào bảng `dxg_price_lookup` (mã nguồn `sql/001_dxg_price_lookup.sql`, đã áp dụng lên Supabase).
+## Lưu đơn giá dự án lên Supabase (nguồn "Kho giá")
+Khung **"Lưu đơn giá dự án lên Supabase"** (chỉ admin, sau khi đã liên kết Supabase) nạp file tổng hợp có sheet **PHAN TICH THEO MA**, chỉ lưu **mô tả, đơn vị, đơn giá** vào bảng `dxg_price_lookup` (mã nguồn `sql/001_dxg_price_lookup.sql`, đã áp dụng lên Supabase). Không có bảng tra cứu riêng: dữ liệu dùng qua nguồn **Kho giá** của app.
 - Đơn vị được chuẩn hóa (`price-lib.js`): m2/M2, m3, md/Mét → m… ; **100m2, 100m3 giữ riêng** vì giá khác 100 lần. Đơn vị có 2–3 đơn vị → `multi_unit`, tra theo mô tả.
-- Bỏ mã tham chiếu, nhóm mã, số lần, tổng tiền. Mỗi lần lưu là một lô mới; tra cứu dùng view `dxg_price_lookup_latest` (lô mới nhất mỗi dự án). Chỉ admin đọc/ghi/xóa (RLS `is_admin()`, `sql/002_dxg_price_lookup_delete.sql`). Không sửa dòng qua API.
-- **Xóa giá theo dự án:** chọn dự án ở ô lọc, bấm **Xóa giá dự án**, xác nhận. Xóa mọi lô của dự án đó; tên dự án vẫn giữ để lưu lại sau.
-- Bộ lọc tra cứu: dự án, từ khóa mô tả (không dấu), đơn vị, khoảng đơn giá.
-- Nguồn **"Kho giá"** được gộp vào app Tra cứu (`docs/assets/app.js`, `NGUON_PHU`) khi admin mở app: hiện trong bộ lọc "Nguồn dữ liệu". Cần đã liên kết Supabase một lần; chưa liên kết hoặc lỗi mạng thì bỏ qua nguồn này.
+- Bỏ mã tham chiếu, nhóm mã, số lần, tổng tiền. Mỗi lần lưu là một lô mới; app dùng view `dxg_price_lookup_latest` (lô mới nhất mỗi dự án), nên lưu lại cùng tên dự án là thay giá cũ. Chỉ admin đọc/ghi/xóa (RLS `is_admin()`, `sql/002_dxg_price_lookup_delete.sql`).
+- **Xóa giá theo dự án:** chọn dự án đã lưu, bấm **Xóa giá dự án**, xác nhận. Xóa mọi lô của dự án đó.
+- Nguồn **"Kho giá"** được gộp vào dữ liệu nội bộ (`docs/assets/app.js`, `NGUON_PHU`, gộp sau cùng) nên dùng chung cho **Tra cứu, Điểm rơi giá, Phân tích (So sánh nguồn), Điền giá BOQ**. Sau khi lưu / xóa, `window.CostCheck.napLaiKho()` cắt các dòng Kho giá cũ, gộp lại lô mới nhất và dựng lại chỉ mục ngay, không cần tải lại trang (module nhận sự kiện `cc:db-changed`).
 - Lưu ý: bản gốc `3_WEB_OFFLINE/assets/app.js` (ngoài repo) cần chép từ `docs/assets/app.js` trước khi chạy `python build.py` đầy đủ.

@@ -218,5 +218,5 @@ html.role-staff #sec-dxg .admin-only { display: none !important; }
 #sec-dxg #dw-body .row-in input[type=search] { min-width: 0; }
 #sec-dxg .lib-row {display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
 #sec-dxg .lib-row input, #sec-dxg .lib-row select {min-width:140px}
-#sec-dxg #lib-q {flex:1;min-width:200px}
+#sec-dxg #lib-proj {flex:1;min-width:200px}
 
