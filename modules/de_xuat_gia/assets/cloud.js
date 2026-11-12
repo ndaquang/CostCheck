@@ -75,6 +75,11 @@
       }
       return { batch, count: rows.length };
     },
+    // Xóa toàn bộ đơn giá (mọi lô) của một dự án; trả về số dòng đã xóa
+    async deletePrices(projectId) {
+      const r = await rest('dxg_price_lookup?project_id=eq.' + encodeURIComponent(projectId), { method: 'DELETE', headers: { Prefer: 'return=representation' } });
+      return (r || []).length;
+    },
     // Lô mới nhất của mỗi dự án (phân trang 1000 dòng); projectId rỗng = mọi dự án
     async loadPrices(projectId) {
       const out = [], flt = projectId ? '&project_id=eq.' + encodeURIComponent(projectId) : '';

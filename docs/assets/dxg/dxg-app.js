@@ -1143,6 +1143,15 @@
         await refreshProjects(); $('#lib-q-proj').value = p.id; await load();
       } catch (e) { st('Lỗi lưu: ' + (e.message || e)); $('#lib-save').disabled = false; }
     });
+    $('#lib-q-proj').addEventListener('change', () => { $('#lib-del').disabled = !$('#lib-q-proj').value; });
+    $('#lib-del').addEventListener('click', async () => {
+      const pid = $('#lib-q-proj').value, p = projects.find(x => x.id === pid); if (!p) return;
+      const n = rows.filter(r => r.project_id === pid).length;
+      if (!confirm(`Xóa toàn bộ đơn giá của dự án "${p.name}" (${NF.format(n)} dòng đang dùng, kể cả các lô cũ) khỏi Supabase?\nKhông hoàn tác được.`)) return;
+      $('#lib-del').disabled = true;
+      try { const k = await C.deletePrices(pid); st(`Đã xóa ${NF.format(k)} dòng của "${p.name}". Tải lại trang để nguồn Kho giá cập nhật.`); $('#lib-q-proj').value = ''; await load(); }
+      catch (e) { st('Lỗi xóa: ' + (e.message || e)); $('#lib-del').disabled = false; }
+    });
     ['#lib-q-proj', '#lib-q-unit'].forEach(s => $(s).addEventListener('change', render));
     ['#lib-q', '#lib-min', '#lib-max'].forEach(s => $(s).addEventListener('input', render));
     return async () => { await refreshProjects(); await load(); };
