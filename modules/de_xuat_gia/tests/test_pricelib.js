@@ -6,14 +6,31 @@ const grid = [['PHAN TICH THEO MA THAM CHIEU'], ['Tong hop'], ['STT', 'Ma tham c
   [4, 'C', 'Đào đất bó vỉa', 'm3', 1, 150000, 1, 1],
   [null, 'TONG CONG', null, null, 1, null, 1, null],
   ['STT', 'Ma tham chieu', 'Mo ta', 'Don vi', 'x', 'Don gia', 'x', 'x']];
-const { rows, skipped } = P.parseGrid(grid);
-assert.strictEqual(rows.length, 4); assert.strictEqual(skipped, 2);
+grid.splice(7, 0, [5, 'D', 'Hạng mục chưa có giá', 'm2', 1, 0, 0, 1]);
+const { rows, skipped, zero } = P.parseGrid(grid);
+assert.strictEqual(rows.length, 4); assert.strictEqual(skipped, 2); assert.strictEqual(zero, 1);
+assert.strictEqual(rows[0].code, 'CUA');
 assert.deepStrictEqual([rows[0].unit_norm, rows[0].multi_unit], ['bộ, m, m2', true]);
 assert.deepStrictEqual([rows[1].unit_norm, rows[1].multi_unit], ['m2', false]);
 assert.strictEqual(rows[2].unit_norm, '100m3');
 assert.strictEqual(P.filter(rows, { q: 'dao dat' }).length, 1);
 assert.strictEqual(P.filter(rows, { unit: '__multi' }).length, 1);
 assert.strictEqual(P.filter(rows, { min: 100000, max: 200000 }).length, 2);
+// Mã nhiều đơn vị → lấy chi tiết ở "TONG HOP CHI TIET"; đơn giá 0 bỏ qua
+const det = [['TONG HOP CHI TIET'], [], ['STT', 'Ma tham chieu', 'Sheet goc', 'Mo ta', 'Don vi', 'Khoi luong', 'Don gia (VND)', 'Thanh tien (VND)'],
+  [1, 'cua', 'S1', 'Kính cường lực mái 13.52mm', 'm2', 10, 3400000, 1],
+  [2, 'CUA', 'S1', 'Nẹp nhôm', 'Mét', 5, 250000, 1],
+  [3, 'CUA', 'S1', 'Phụ kiện', 'Bộ', 1, 0, 0],
+  [4, null, 'S1', 'Kính phòng họp', 'm2', 3, 1800000, 1],
+  [5, 'A', 'S1', 'Phun cát', 'm2', 1, 120000, 1]];
+const cb = P.combine(P.parseGrid(grid), P.parseDetail(det));
+assert.strictEqual(cb.multi, 1); assert.strictEqual(cb.fromDetail, 3); assert.deepStrictEqual(cb.noDetail, []);
+assert.ok(!cb.rows.some(r => r.multi_unit));
+assert.deepStrictEqual(cb.rows.filter(r => r.code === 'CUA').map(r => [r.description, r.unit_norm, r.unit_price]),
+  [['Kính cường lực mái 13.52mm', 'm2', 3400000], ['Nẹp nhôm', 'm', 250000], ['Kính phòng họp', 'm2', 1800000]]);
+assert.strictEqual(cb.rows.length, 6);
+const cb0 = P.combine(P.parseGrid(grid), null);   // không có sheet chi tiết
+assert.strictEqual(cb0.rows.length, 3); assert.deepStrictEqual(cb0.noDetail, ['CUA']);
 console.log('test_pricelib OK');
 // toDB + mergeDB (nguồn "Kho giá" gộp vào CSDL)
 const X = require('../assets/pricing.js'), { makeDB } = require('./fixture_db.js');
