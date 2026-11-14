@@ -866,11 +866,18 @@ function setupNav() {
   nav.insertBefore(a, dt);
 }
 // "12.345 đơn giá (Nội bộ 10.000 · CTG 2.000 · Đối thủ 345)" khi dữ liệu có từ 2 nguồn
+// Thanh đầu chỉ kể Nội bộ / CTG / Đối thủ; nguồn Kho giá không hiện ở đây (dòng vẫn dùng cho tra cứu và điền giá)
+const NGUON_AN_THANH = ['Kho giá'];
 function demNguon() {
   if (!C.ng || !D.ng || D.ng.length < 2) return '';
   const cnt = new Map();
-  for (let i = 0; i < N; i++) { const s = srcOf(i); cnt.set(s, (cnt.get(s) || 0) + 1); }
+  for (let i = 0; i < N; i++) { const s = srcOf(i); if (NGUON_AN_THANH.includes(s)) continue; cnt.set(s, (cnt.get(s) || 0) + 1); }
   return cnt.size > 1 ? ` (${[...cnt].sort((a, b) => NGUON_THU_TU.indexOf(a[0]) - NGUON_THU_TU.indexOf(b[0])).map(([k, n]) => `${k} ${NF.format(n)}`).join(' · ')})` : '';
+}
+function soDonGiaThanh() {
+  if (!C.ng || !D.ng) return N;
+  let an = 0; for (let i = 0; i < N; i++) if (NGUON_AN_THANH.includes(srcOf(i))) an++;
+  return N - an;
 }
 function applyDS() {
   const root = document.documentElement;
@@ -881,7 +888,7 @@ function applyDS() {
   $('#q').placeholder = RIENG ? RIENG.ph : GOC.ph;
   $$('.topnav [data-sec]').forEach(a => { a.hidden = !!RIENG; });   // bộ riêng: chỉ tra cứu
   $$('.topnav [data-ds]').forEach(a => { a.classList.toggle('on', a.dataset.ds === DS); if (a.dataset.ds === 'noibo') a.hidden = !RIENG; });
-  $('#db-meta').textContent = `${NF.format(N)} đơn giá${demNguon()} · ${NF.format(D.p.length)} dự án · ${NF.format(D.f.length)} file nguồn · cập nhật ${DB.built}`;
+  $('#db-meta').textContent = `${NF.format(soDonGiaThanh())} đơn giá${demNguon()} · ${NF.format(D.p.length)} dự án · ${NF.format(D.f.length)} file nguồn · cập nhật ${DB.built}`;
 }
 function switchDS(ds) {
   if (ds === DS || dangChuyen || (DS_RIENG[ds] && ROLE !== 'admin')) return;
