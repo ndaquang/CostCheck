@@ -255,7 +255,9 @@ Mọi dữ liệu trong `tests/` là giả lập.
 
 ## Lưu đơn giá dự án lên Supabase (nguồn "Kho giá")
 Khung **"Lưu đơn giá dự án lên Supabase"** (chỉ admin, sau khi đã liên kết Supabase) nạp file tổng hợp có sheet **PHAN TICH THEO MA**, chỉ lưu **mô tả, đơn vị, đơn giá** vào bảng `dxg_price_lookup` (mã nguồn `sql/001_dxg_price_lookup.sql`, đã áp dụng lên Supabase). Không có bảng tra cứu riêng: dữ liệu dùng qua nguồn **Kho giá** của app.
-- Đơn vị được chuẩn hóa (`price-lib.js`): m2/M2, m3, md/Mét → m… ; **100m2, 100m3 giữ riêng** vì giá khác 100 lần. Đơn vị có 2–3 đơn vị → `multi_unit`, tra theo mô tả.
+- Đơn vị được chuẩn hóa (`price-lib.js`): m2/M2, m3, md/Mét → m… ; **100m2, 100m3 giữ riêng** vì giá khác 100 lần.
+- **Mã tham chiếu có nhiều đơn vị** (vd `CUA`: "Bộ, Mét, m2"): không lưu dòng tổng hợp (đơn giá trộn nhiều đơn vị là vô nghĩa), thay bằng **các dòng chi tiết của mã đó ở sheet `TONG HOP CHI TIET`**, mỗi dòng một đơn vị, mô tả chi tiết riêng. Khớp theo cột *Ma tham chieu* (không phân biệt hoa thường). Không có sheet chi tiết hoặc mã không có chi tiết thì mã đó bị bỏ, khung báo tên mã.
+- **Đơn giá = 0 thì bỏ qua**: mã tổng hợp có đơn giá ≤ 0 bỏ cả mã (không lấy chi tiết); dòng chi tiết đơn giá ≤ 0 cũng bỏ.
 - Bỏ mã tham chiếu, nhóm mã, số lần, tổng tiền. Mỗi lần lưu là một lô mới; app dùng view `dxg_price_lookup_latest` (lô mới nhất mỗi dự án), nên lưu lại cùng tên dự án là thay giá cũ. Chỉ admin đọc/ghi/xóa (RLS `is_admin()`, `sql/002_dxg_price_lookup_delete.sql`).
 - **Xóa giá theo dự án:** chọn dự án đã lưu, bấm **Xóa giá dự án**, xác nhận. Xóa mọi lô của dự án đó.
 - Nguồn **"Kho giá"** được gộp vào dữ liệu nội bộ (`docs/assets/app.js`, `NGUON_PHU`, gộp sau cùng) nên dùng chung cho **Tra cứu, Điểm rơi giá, Phân tích (So sánh nguồn), Điền giá BOQ**. Sau khi lưu / xóa, `window.CostCheck.napLaiKho()` cắt các dòng Kho giá cũ, gộp lại lô mới nhất và dựng lại chỉ mục ngay, không cần tải lại trang (module nhận sự kiện `cc:db-changed`).

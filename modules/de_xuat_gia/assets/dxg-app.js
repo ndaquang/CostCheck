@@ -1131,8 +1131,12 @@
       try {
         const r = await PL.readWorkbook(await XLSXIO.read(await file.arrayBuffer()));
         pending = { file: file.name, rows: r.rows };
-        const multi = r.rows.filter(x => x.multi_unit).length;
-        st(`${file.name}: ${NF.format(r.rows.length)} dòng hợp lệ (${multi} nhiều đơn vị, bỏ ${r.skipped} dòng tiêu đề/tổng).`);
+        const ghi = [];
+        if (r.multi) ghi.push(`${r.multi} mã nhiều đơn vị → ${NF.format(r.fromDetail)} dòng chi tiết từ "TONG HOP CHI TIET"`);
+        if (r.multi && !r.hasDetail) ghi.push('không có sheet "TONG HOP CHI TIET" nên bỏ các mã nhiều đơn vị');
+        else if (r.noDetail.length) ghi.push(`${r.noDetail.length} mã không thấy chi tiết, bỏ qua: ${r.noDetail.slice(0, 5).join(', ')}${r.noDetail.length > 5 ? '…' : ''}`);
+        if (r.zero) ghi.push(`bỏ ${r.zero} mã đơn giá = 0`);
+        st(`${file.name}: ${NF.format(r.rows.length)} dòng sẽ lưu. ` + ghi.join('; ') + (ghi.length ? '.' : ''));
         $('#lib-save').disabled = !r.rows.length;
       } catch (e) { pending = null; $('#lib-save').disabled = true; st(e.message || String(e)); }
       ev.target.value = '';

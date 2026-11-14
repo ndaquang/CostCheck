@@ -93,7 +93,7 @@
   <!-- Kho đơn giá tra cứu (Supabase) -->
   <section class="card" id="step-lib" hidden>
     <h2>Lưu đơn giá dự án lên Supabase</h2>
-    <p class="muted small">Nạp file tổng hợp có sheet <b>PHAN TICH THEO MA</b>; chỉ lưu <b>mô tả, đơn vị, đơn giá</b>. Lưu xong, nguồn <b>Kho giá</b> được cập nhật ngay cho Tra cứu, Điểm rơi giá, Phân tích và Điền giá BOQ. Lưu lại cùng tên dự án sẽ thay giá cũ của dự án đó.</p>
+    <p class="muted small">Nạp file tổng hợp có sheet <b>PHAN TICH THEO MA</b>; chỉ lưu <b>mô tả, đơn vị, đơn giá</b>. Mã nhiều đơn vị lấy các dòng chi tiết ở sheet <b>TONG HOP CHI TIET</b>; mã có đơn giá = 0 bỏ qua. Lưu xong, nguồn <b>Kho giá</b> được cập nhật ngay cho Tra cứu, Điểm rơi giá, Phân tích và Điền giá BOQ. Lưu lại cùng tên dự án sẽ thay giá cũ của dự án đó.</p>
     <div class="lib-row">
       <input id="lib-proj" list="lib-projs" placeholder="Tên dự án (vd: Dự án Gremsy)" value="Dự án Gremsy"><datalist id="lib-projs"></datalist>
       <label class="btn pick"><input type="file" id="lib-file" accept=".xlsx,.xlsm" hidden>Chọn file tổng hợp…</label>
