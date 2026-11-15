@@ -10,12 +10,20 @@
   const KEY = 'sb_publishable_fHLD4RIdRQVZ_R-ud9aMFA_ORNbxBUH';
   let tok = null, refresh = null, exp = 0, email = '';
 
+  // Mỗi lệnh gọi có hạn 20 giây: app tra cứu chờ nguồn Kho giá khi khởi động, mạng treo thì bỏ qua Kho giá chứ không đứng ở màn hình nạp dữ liệu.
+  const HAN_MS = 20000;
   async function raw(path, opt = {}, bearer) {
-    const r = await fetch(URL_ + path, {
-      ...opt, referrerPolicy: 'no-referrer', credentials: 'omit',
-      headers: { apikey: KEY, 'Content-Type': 'application/json', ...(bearer ? { Authorization: 'Bearer ' + bearer } : {}), ...(opt.headers || {}) },
-    });
-    const txt = await r.text();
+    const ac = new AbortController(), han = setTimeout(() => ac.abort(), HAN_MS);
+    let r, txt;
+    try {
+      r = await fetch(URL_ + path, {
+        ...opt, referrerPolicy: 'no-referrer', credentials: 'omit', signal: ac.signal,
+        headers: { apikey: KEY, 'Content-Type': 'application/json', ...(bearer ? { Authorization: 'Bearer ' + bearer } : {}), ...(opt.headers || {}) },
+      });
+      txt = await r.text();
+    } catch (e) {
+      throw new Error(ac.signal.aborted ? `Supabase không phản hồi sau ${HAN_MS / 1000} giây` : 'Không kết nối được Supabase (' + (e && e.message || e) + ')');
+    } finally { clearTimeout(han); }
     let j = null; try { j = txt ? JSON.parse(txt) : null; } catch (e) { /* không phải JSON */ }
     if (!r.ok) { const e = new Error((j && (j.msg || j.message || j.error_description)) || ('HTTP ' + r.status)); e.status = r.status; throw e; }
     return j;

@@ -106,9 +106,11 @@ async function gopNguonPhu(db) {
     if (!src || !src.cols || !Array.isArray(src.cols.name) || !src.count) { PHU.push({ label: n.label, status: 'format' }); continue; }
     PHU.push({ label: n.label, status: 'ok', ...X.mergeDB(db, src, n.label) });
   }
-  console.info('Nguồn dữ liệu:', PHU.map(x => `${x.label} ${x.status}${x.dong ? ` (${x.dong} dòng)` : ''}`).join(', '));
+  console.info('Nguồn dữ liệu:', PHU.map(x => `${x.label} ${x.status}${x.dong ? ` (${x.dong} dòng${nrmTomTat(x.phanLoai)})` : ''}`).join(', '));
   return db;
 }
+// Tóm tắt bước phân loại NRM2 của một nguồn vừa gộp (mergeDB → phanLoai); rỗng nếu nguồn không có dòng nào cần phân loại
+const nrmTomTat = pl => { const n = pl ? pl.khopTen + pl.knn + pl.tuKhoa + pl.chua : 0; return n ? `; NRM2 tự phân loại ${n - pl.chua}/${n} dòng` : ''; };
 // Kho giá gộp sau cùng nên các dòng của nó nằm cuối CSDL (từ mốc khoMoc): nạp lại = cắt về mốc rồi gộp lô mới nhất.
 async function gopKho(db) {
   const L = 'Kho giá', m = db.khoMoc, C = db.cols;
@@ -129,7 +131,14 @@ async function napLaiKho() {
   if (!db || !db.khoMoc) throw new Error('Dữ liệu nội bộ chưa nạp nguồn phụ');
   const r = await gopKho(db);
   if (DS === 'noibo') {
+    // Dựng lại chỉ mục + bộ lọc: giữ các lựa chọn đang có (theo nhãn), nếu không Tra cứu mất bộ lọc và hiện cả nguồn đang ẩn (đối thủ).
+    // Nguồn dữ liệu đang lọc mà Kho giá vừa mới có: chọn thêm Kho giá, để giá vừa lưu hiện ngay.
+    const giu = FACETS.map(f => [f.key, [...f.sel].map(v => f.labels[v])]);
+    const coKho = FACETS.some(f => f.key === 'ng' && f.labels.includes('Kho giá'));
     useDB(db);
+    for (const [k, ls] of giu) { const f = FACETS.find(x => x.key === k); if (f) for (const l of ls) { const j = f.labels.indexOf(l); if (j >= 0) f.sel.add(j); } }
+    const fng = FACETS.find(f => f.key === 'ng');
+    if (fng && fng.sel.size && !coKho && fng.labels.includes('Kho giá')) fng.sel.add(fng.labels.indexOf('Kho giá'));
     expCache.clear(); DROP.g = null; DROP.tops = {}; lastSearchQ = null;
     run();
     if (SECTION === 'diem-roi') renderDrop();
@@ -343,7 +352,7 @@ function buildFacets() {
   FACETS = [
     { key: 'nrm', label: 'Nhóm công việc NRM2', open: true, sort: 'label', limit: 40,
       labels: [...nrm.map(n => `${n[0]} · ${n[1]}`), UNK], group: [...nrm.map(n => n[2]), ''],
-      code: i => C.n[i] < 0 ? nrm.length : C.n[i] },
+      code: i => C.n[i] >= 0 && C.n[i] < nrm.length ? C.n[i] : nrm.length },
     { key: 'w', label: 'Loại công việc', search: true, ...fromDict(C.w, D.w) },
     { key: 'e', label: 'Cấu kiện', ...fromDict(C.e, D.e) },
     { key: 'u', label: 'Đơn vị', search: true, ...fromDict(C.u, D.u) },
@@ -370,10 +379,10 @@ function buildFacets() {
     }
     FACETS.splice(FACETS.findIndex(f => f.key === 'w') + 1, 0, { key: 'lkg', label: 'Nhóm mã công tác (CTG)', search: true, labels, code: i => codes[i] });
   }
-  if (C.src) {   // NRM2 gán tự động khi làm sạch → lọc theo cách phân loại để rà soát
-    const L = ['Theo CSDL gốc', 'Khớp tên đã phân loại', 'Tự động kNN', 'Theo mã công tác', UNK];
-    const m = D.src.map(s => { const k = L.findIndex(l => s.startsWith(l)); return k < 0 ? 4 : k; });
-    FACETS.push({ key: 'src', label: 'Nguồn phân loại NRM2', labels: L, code: i => C.src[i] < 0 ? 4 : m[C.src[i]] });
+  if (C.src) {   // NRM2 gán tự động (khi làm sạch, hoặc khi gộp nguồn: pricing.js classifyNRM2) → lọc theo cách phân loại để rà soát
+    const L = ['Theo CSDL gốc', 'Khớp tên đã phân loại', 'Tự động kNN', 'Theo mã công tác', 'Theo từ khóa', UNK], U = L.length - 1;
+    const m = D.src.map(s => { const k = L.findIndex(l => s.startsWith(l)); return k < 0 ? U : k; });
+    FACETS.push({ key: 'src', label: 'Nguồn phân loại NRM2', labels: L, code: i => C.src[i] >= 0 ? m[C.src[i]] : U });
   }
   if (C.ng) FACETS.splice(0, 0, { key: 'ng', label: 'Nguồn dữ liệu', open: true, ...fromDict(C.ng, D.ng) });
   for (const f of FACETS) {
@@ -671,7 +680,7 @@ function showRow(i) {
     ['Thông số kỹ thuật', esc(C.spec[i])], ['Tên công việc (gốc)', C.oname ? esc(C.oname[i]) : ''],
     ['Hạng mục cha', esc(C.par[i] >= 0 ? D.par[C.par[i]] : '')], ['Mã hiệu gốc', esc(C.code[i])],
     ['Mã công tác', C.lk ? esc(C.lk[i]) : ''],
-    ['NRM2', `${esc(nr[0])} · ${esc(nr[1])}${C.src && C.src[i] >= 0 && D.src[C.src[i]] !== 'Theo CSDL gốc' ? ` <span class="muted">(${esc(D.src[C.src[i]])})</span>` : ''}`],
+    ['NRM2', !nr[0] ? '' : `${esc(nr[0])} · ${esc(nr[1])}${C.src && C.src[i] >= 0 && D.src[C.src[i]] !== 'Theo CSDL gốc' ? ` <span class="muted">(${esc(D.src[C.src[i]])})</span>` : ''}`],
     ['Loại công việc', esc(C.w[i] >= 0 ? D.w[C.w[i]] : '')], ['Vật tư chuẩn hóa', C.vt && C.vt[i] >= 0 ? esc(D.vt[C.vt[i]]) : ''],
     ['Năm báo giá', C.y[i] || ''], ['Dự án', p[1] && p[1] !== p[0] ? `${esc(p[1])} <span class="muted">(${esc(p[0])})</span>` : esc(p[0])],
     ['Loại hình', esc(p[2])], ['Tỉnh/TP', esc([p[3], p[4] && p[4] !== p[3] ? '→ ' + p[4] + ' (2025)' : ''].filter(Boolean).join(' '))],

@@ -307,4 +307,57 @@ t('kiểm tra số học BOQ đã có giá', () => {
   assert.strictEqual(DXG.judgePrice(200, ref).level, 'cao');
   assert.strictEqual(DXG.judgePrice(50, ref).level, 'thap');
 });
+t('bước phân loại cho dòng gộp thêm (NRM2, loại công việc, cấu kiện): khớp tên → kNN → từ khóa; nguồn có danh mục NRM2 riêng thì ánh xạ theo mã', () => {
+  const NRM = [['11', 'Bê tông đổ tại chỗ', 'KẾT CẤU'], ['14', 'Khối xây', 'HOÀN THIỆN'], ['28', 'Hoàn thiện sàn/tường/trần', 'HOÀN THIỆN'], ['29', 'Sơn, trang trí', 'HOÀN THIỆN'],
+    ['30', 'Trần', 'HOÀN THIỆN'], ['05', 'Đào đắp đất', 'PHẦN NGẦM'], ['24', 'Cửa đi, cửa cuốn', 'HOÀN THIỆN'], ['00', 'Chưa phân loại', 'CHƯA PHÂN LOẠI']];
+  const maCua = ten => /^(Bê tông|BT|Đổ bê tông|Cốt thép|Thép|Sản xuất|Ván khuôn|Cốp pha|Lắp dựng)/.test(ten) ? '11' : /^Xây/.test(ten) ? '14' : /^(Trát|Lát)/.test(ten) ? '28'
+    : /^Sơn/.test(ten) ? '29' : /^(Trần|Thi công trần)/.test(ten) ? '30' : /^Đào/.test(ten) ? '05' : '00';
+  // loại công việc (w) và cấu kiện (e): cột mã hóa theo từ điển, như khối db của 2_XU_LY
+  const loaiCua = ten => /^(Bê tông|BT|Đổ bê tông)/.test(ten) ? 'Bê tông' : /^(Cốt thép|Thép|Sản xuất)/.test(ten) ? 'Cốt thép' : /^(Ván khuôn|Cốp pha|Lắp dựng)/.test(ten) ? 'Ván khuôn'
+    : /^Xây/.test(ten) ? 'Xây' : /^Trát/.test(ten) ? 'Trát' : /^Lát/.test(ten) ? 'Lát' : /^Sơn/.test(ten) ? 'Sơn' : /^(Trần|Thi công trần)/.test(ten) ? 'Trần' : /^Đào/.test(ten) ? 'Đào đất' : null;
+  const ckCua = ten => /móng/i.test(ten) ? 'Móng' : /cột/i.test(ten) ? 'Cột' : /tường/i.test(ten) ? 'Tường' : null;
+  const coNRM = (db, nrm) => {
+    db.nrm2 = nrm.map(x => x.slice()); db.cols.n = db.cols.name.map(ten => nrm.findIndex(x => x[0] === maCua(ten)));
+    for (const [k, fn] of [['w', loaiCua], ['e', ckCua]]) { const d = db.dicts[k] = []; db.cols[k] = db.cols.name.map(ten => { const v = fn(ten); if (v === null) return -1; let j = d.indexOf(v); if (j < 0) j = d.push(v) - 1; return j; }); }
+    return db;
+  };
+  const dst = coNRM(makeDB(), NRM), n0 = dst.count;
+  const PL = require('../assets/price-lib.js');
+  const ten = ['Bê tông móng M300 đá 1x2', 'Lát gạch 600x600', 'Sơn nước tường ngoài nhà 2 lớp phủ', 'Cửa đi thép chống cháy 2 cánh', 'Hạng mục xyz không rõ', 'Sơn nước tường ngoài nhà 2 lớp phủ'];
+  const kho = PL.toDB(ten.map((d, k) => ({ project_id: 'p1', description: d, unit_raw: k === 0 ? 'm3' : 'm2', unit_norm: k === 0 ? 'm3' : 'm2', unit_price: 100000 + k, created_at: '2026-11-11T00:00:00Z' })), [{ id: 'p1', name: 'Dự án mới' }]);
+  assert.ok(!kho.cols.n);   // Kho giá chỉ có mô tả, đơn vị, đơn giá
+  const r = DXG.mergeDB(dst, kho, 'Kho giá');
+  assert.deepStrictEqual(r.phanLoai, { khopTen: 2, knn: 2, tuKhoa: 1, chua: 1, loaiCV: 4, cauKien: 3 });
+  // loại công việc / cấu kiện cũng được xếp ở cùng bước (khớp nhóm, khớp tên, kNN); không đủ chắc thì để trống
+  const tu = (k, j) => dst.cols[k][n0 + j] >= 0 ? dst.dicts[k][dst.cols[k][n0 + j]] : '';
+  assert.deepStrictEqual(ten.map((_, j) => tu('w', j)), ['Bê tông', 'Lát', 'Sơn', '', '', 'Sơn']);
+  assert.deepStrictEqual(ten.map((_, j) => tu('e', j)), ['Móng', '', 'Tường', '', '', 'Tường']);
+  const ma = k => dst.nrm2[dst.cols.n[n0 + k]][0], cach = k => dst.cols.src[n0 + k] >= 0 ? dst.dicts.src[dst.cols.src[n0 + k]] : '';
+  assert.deepStrictEqual(ten.map((_, k) => ma(k)), ['11', '28', '29', '24', '00', '29']);
+  assert.deepStrictEqual(ten.map((_, k) => cach(k)), ['Khớp tên đã phân loại', 'Khớp tên đã phân loại', 'Tự động kNN', 'Theo từ khóa', '', 'Tự động kNN']);
+  assert.ok(dst.cols.n.every(v => Number.isInteger(v)));   // không còn null (null vào Int32Array thành 0 = nhóm NRM2 đầu tiên)
+  assert.ok(dst.cols.src.slice(0, n0).every(v => v === -1));   // dòng có sẵn không bị đổi
+  Object.keys(dst.cols).forEach(k => assert.strictEqual(dst.cols[k].length, dst.count, k));
+  assert.ok(!Object.keys(dst).includes('_nrm') && !JSON.stringify(dst).includes('"_nrm"'));   // mô hình phân loại không lọt vào dữ liệu
+  // nạp lại cùng mốc (Kho giá): dùng lại mô hình, kết quả như cũ
+  for (const k of Object.keys(dst.cols)) dst.cols[k].length = n0;
+  dst.count = n0; dst.projects.length -= 1;
+  assert.deepStrictEqual(DXG.mergeDB(dst, kho, 'Kho giá').phanLoai, r.phanLoai);
+  // nguồn có cột n + danh mục NRM2 thứ tự khác: ánh xạ theo mã, mã dst chưa có thì thêm vào danh mục
+  const a = coNRM(makeDB(), NRM), b = coNRM(makeDB(), [['99', 'Nhóm riêng của nguồn', 'KHÁC'], ...NRM.slice().reverse()]);
+  b.cols.n[0] = 0;
+  const na = a.count; DXG.mergeDB(a, b, 'Đối thủ');
+  for (let i = 1; i < b.count; i++) if (b.nrm2[b.cols.n[i]][0] !== '00') assert.strictEqual(a.nrm2[a.cols.n[na + i]][0], b.nrm2[b.cols.n[i]][0], b.cols.name[i]);
+  assert.strictEqual(a.nrm2[a.cols.n[na]][0], '99'); assert.strictEqual(a.nrm2.length, NRM.length + 1);
+  // CSDL không có cột n / danh mục NRM2: bỏ qua bước phân loại
+  const c = makeDB(); assert.deepStrictEqual(DXG.mergeDB(c, kho, 'Kho giá').phanLoai, { khopTen: 0, knn: 0, tuKhoa: 0, chua: 0, loaiCV: 0, cauKien: 0 }); assert.ok(!c.cols.n && !c.cols.src);
+  // từ khóa dùng chung với CTG
+  assert.strictEqual(DXG.nrm2ByKeyword('Tháo dỡ ván khuôn móng'), '11'); assert.strictEqual(DXG.nrm2ByKeyword('abc xyz'), null);
+  // mô tả BOQ dài (Kho giá): công việc chính nêu đầu mô tả thắng cụm phụ đứng sau; quy tắc ưu tiên (cốp pha…) vẫn thắng
+  const dai = 'CCLD Cửa đi 2 cánh chống cháy hệ khung thép, tấm thép dày 1mm ốp 2 mặt';
+  assert.strictEqual(DXG.nrm2ByKeyword(dai), '28'); assert.strictEqual(DXG.nrm2ByKeyword(dai, true), '24');
+  assert.strictEqual(DXG.nrm2ByKeyword('CCLD hàng rào thép hộp cao 1.5m, sơn chống rỉ hoàn thiện', true), '36');
+  assert.strictEqual(DXG.nrm2ByKeyword('Lắp dựng tháo dỡ ván khuôn cột', true), '11');
+});
+
 console.log(`\n${n} nhóm kiểm thử đạt.`);

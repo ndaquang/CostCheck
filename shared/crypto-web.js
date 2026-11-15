@@ -9,7 +9,8 @@
   const dec = new TextDecoder();
   const MAGIC = 'DGW1';
 
-  const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  // Vòng lặp trên mảng cấp phát sẵn: khối dữ liệu vài chục MB nhanh hơn nhiều lần so với Uint8Array.from(chuỗi, hàm)
+  const b64 = s => { const bin = atob(s), n = bin.length, out = new Uint8Array(n); for (let i = 0; i < n; i++) out[i] = bin.charCodeAt(i); return out; };
 
   // Khóa bọc (KEK) từ mật khẩu. extractable = false: không đọc lại được bằng JavaScript.
   async function khoaTuMatKhau(matKhau, salt, soVong) {

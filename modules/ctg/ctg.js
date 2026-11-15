@@ -5,7 +5,7 @@
    • Nhóm đại diện = cùng tên công việc (đã chuẩn hóa) + cùng đơn vị; tên nhóm = cách ghi dùng ở nhiều dự án nhất.
    • Nhóm công việc NRM2 xếp theo từ khóa trong tên, không khớp thì theo tiền tố "Mã công tác link" (MC.FW-…, INF.MH-…).
    • Giá giữ nguyên theo từng file CTG (không quy đổi theo năm). */
-const { norm } = require('../de_xuat_gia/assets/pricing.js');
+const { norm, nrm2ByKeyword } = require('../de_xuat_gia/assets/pricing.js');
 
 const COT = {   // tiêu đề cột sheet DATABASE (đã chuẩn hóa) → khóa
   ten: 'ten cong viec', dv: 'don vi', ma: 'ma goc', link: 'ma cong tac link', nc: 'nhan cong', vt: 'vat tu',
@@ -47,45 +47,7 @@ const NRM2 = [
   ['00', 'Chưa phân loại', 'CHƯA PHÂN LOẠI'],
 ];
 
-// Từ khóa theo tên công việc (chữ thường, có dấu), xét lần lượt, khớp quy tắc đầu tiên.
-// Thứ tự quan trọng: "tháo dỡ ván khuôn" là cốp pha, "hố ga xây gạch" là thoát nước, "bê tông nhựa" là đường.
-const tu = s => new RegExp(`(?<![\\p{L}\\p{N}])(?:${s})(?![\\p{L}\\p{N}])`, 'u');
-const QUY_TAC = [
-  ['09', tu('tường vây|tường dẫn|tường barr?ett?e|barr?ett?e|cừ|kingpost|king post')],
-  ['07', tu('cọc(?! tiêu| neo| mốc)|đầu cọc|khoan (?:dẫn|nhồi|tạo lỗ)|nén tĩnh|thử tĩnh|pda|ống siêu âm|ống vách|casa')],
-  ['01', tu('huy động|giải thể|biện pháp|lán trại|hàng rào tạm|(?:điện|nước|đường|công trình) tạm|bảo hiểm|vệ sinh công (?:nghiệp|trường)|shoring|chống xiên|khung giằng|thang lên xuống|bạt che|chi phí (?:chung|quản lý)|quan trắc|hoàn công|thí nghiệm')],
-  ['11', tu('ván khuôn|cốp ?pha|copha|cốt thép|thép lưới|lưới thép|thép (?:d|ø|φ|cb)\\s?\\d+|d\\d{2}|(?:khoan )?cấy thép|khoan cấy|dự ứng lực|dul|cáp ult|neo cáp|dowel|thanh truyền lực')],
-  ['03', tu('phá dỡ|phá bỏ|phá|đập phá|đục phá|cắt phá|tháo dỡ|tháo bỏ|xà bần|đổ bỏ')],
-  ['34', tu('hố ga|hố van|cống|mương|rãnh(?: thoát| bê tông| btct)?|thoát nước|thoát sàn|phễu thu|nắp (?:hố|gang|đan|thăm|bể)|bể (?:tự hoại|tách|xlnt|xử lý|phốt|chứa)|đấu nối|ống (?:bê tông|btct)')],
-  ['05', tu('đào|đắp (?:đất|cát|trả|hoàn trả|nền|bờ)|đầm (?:đất|cát|chặt|nền)|lấp (?:đất|cát)|vận chuyển đất|đất (?:thừa|đổ|đắp)|hạ mực nước|bóc (?:lớp|đất|hữu cơ)|phát quang|cát (?:lót|đệm)|kè')],
-  ['35', tu('bê tông nhựa|btn[cn]?\\s?\\d*|nhựa (?:thấm|dính|lót)|thảm nhựa|cấp phối|cpđd|đá dăm|đá mi|sỏi|vải địa|bó vỉa|vỉa hè|gạch (?:tự chèn|con sâu|terrazzo)|vạch|sơn (?:kẻ|phản quang)|kẻ vạch|gờ giảm tốc|mũi tên|san nền|tôn nền|san lấp|neoweb|chống xói|mặt đường|lề đường|bãi đỗ|ô đậu|đậu xe|chặn (?:xe|bánh xe)|biển báo giao thông')],
-  ['06', tu('chống mối|diệt mối|gia cố nền|xử lý nền')],
-  ['18', tu('ngói')],
-  ['17', tu('tôn|lợp|máng xối|diềm|úp nóc|flashing|tấm lấy sáng|skylight|mái (?:tôn|panel|kính)')],
-  ['19', tu('chống thấm|waterstop|băng cản nước|màng (?:khò|bitum|hdpe|chống)|quét chống|(?:chỉ|gờ) ngắt nước')],
-  ['21', tu('alu|composite|ốp nhôm|tấm nhôm|lam (?:nhôm|thép|chắn nắng)|louver|mặt dựng')],
-  ['25', tu('lan can|tay vịn|cầu thang (?:thép|sắt|inox)|thang (?:khỉ|leo|thép)')],
-  ['31', tu('(?:sơn|bọc|phun) chống cháy')],
-  // động từ hoàn thiện đứng trước "cửa": "trát má cửa", "sơn cửa" là hoàn thiện; "cửa … sơn tĩnh điện" vẫn là cửa
-  ['28', tu('trát|(?<!lanh |ô )tô|cán (?:nền|vữa|sàn)|láng|lát|ốp|len|ron|cắt ron|ngạch')],
-  ['29', tu('sơn(?! tĩnh điện)|bả|matit|matít|skim ?coat|phào|gờ chỉ|đắp chỉ|giả gỗ|giả đá|epoxy')],
-  ['20', tu('vách(?! kính)|panel|tấm (?:alc|cemboard|xi măng|compact|calcium)|cemboard|compact')],
-  ['14', tu('xây|tường (?:gạch|aac|alc|block)|gạch (?:đặc|ống|rỗng|thẻ|block|không nung|nung|bê tông|aac|đinh)|aac|block')],
-  ['15', tu('kết cấu thép|khung thép|kèo|xà gồ|bu ?lông|bulong|thép hình|thép hộp|cột thép|dầm thép|bản mã|bản tấm thép|kct|thép [ihcz]\\s?\\d+|ss400')],
-  ['11', tu('bê tông|btct|bt lót|lanh tô|giằng tường|bổ trụ|ô văng|xoa nền|phụ gia|bệ máy|kicker|khe (?:co|giãn|dọc|cô lập|nhiệt)|nilon|ni lông|lớp (?:pe|pvc)|grout|parapet')],
-  ['23', tu('cửa sổ|vách kính')],
-  ['24', tu('cửa')],
-  ['36', tu('hàng rào|cổng|barrier|barie|rào chắn|thanh chắn')],
-  ['27', tu('kính')],
-  ['31', tu('cách nhiệt|cách âm|chống cháy|ngăn cháy|bông (?:thủy tinh|khoáng)|xốp|xps|eps|pir')],
-  ['29', tu('trang trí|đề can|decal|chỉ')],
-  ['28', tu('gạch|granite|marble|đá (?:mài|ốp|lát|tự nhiên|hoa cương|granite)|sàn (?:gỗ|nhựa|vinyl|nâng)|vinyl|thảm|hardener|tăng cứng|tự san phẳng|vữa|nẹp|mài (?:sàn|nền)|chống trượt')],
-  ['30', tu('trần')],
-  ['37', tu('cây|trồng|cỏ|hoa|đất (?:trồng|màu)|tiểu cảnh|cảnh quan|chậu')],
-  ['32', tu('ghế|bàn|tủ|kệ|quầy|giường|thiết bị|bảng|bản tên|biển|gương|phụ kiện|thùng rác|trò chơi|dụng cụ|rèm|võng|bồn tắm|lavabo|logo|chữ|phòng')],
-  ['38', tu('điện|đèn|cáp|máng cáp|ống (?:pvc|hdpe|ppr|upvc|nhựa|gang|thép tráng)|cấp nước|bơm|pccc|chữa cháy|camera|tiếp địa|chống sét|trạm biến áp|ống gió|điều hòa|thông gió|hút bụi|mep')],
-  ['26', tu('inox|thép (?:góc|tấm|la|ống|tròn)|chi tiết thép|móc|chống va|bảo vệ góc|ke góc')],
-];
+// Từ khóa theo tên công việc: quy tắc NRM2_TU_KHOA dùng chung với bước phân loại NRM2 khi gộp nguồn (pricing.js nrm2ByKeyword).
 // Tiền tố "Mã công tác link" (sau MC. / SC. / INF.) khi tên không khớp từ khóa nào
 const TIEN_TO = {
   '01': 'BPTC GE', '03': 'DE DEMO DISMANTLE', '05': 'ER EW BF WA', '06': 'AT', '07': 'PL D300 D350 D400 KN TC',
@@ -97,8 +59,8 @@ const TIEN_TO = {
 const MA_TIEN_TO = new Map(Object.entries(TIEN_TO).flatMap(([ma, ds]) => ds.split(' ').map(t => [t, ma])));
 
 function phanLoai(ten, link) {
-  const s = String(ten || '').toLowerCase().normalize('NFC');
-  for (const [ma, re] of QUY_TAC) if (re.test(s)) return ma;
+  const ma = nrm2ByKeyword(ten);
+  if (ma) return ma;
   const dau = String(link || '').split('-')[0].split('.');
   return MA_TIEN_TO.get((dau[1] || dau[0]).trim().toUpperCase()) || '00';
 }

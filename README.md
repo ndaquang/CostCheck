@@ -13,7 +13,8 @@ Gói dữ liệu mã hóa (`.dgbw`) nằm riêng ở `../6_GOI_DU_LIEU_WEBAPP/`.
 - **Dữ liệu chỉ tồn tại dạng mã hóa**, trong gói `.dgbw` do admin tạo trên máy mình. Gói được chuyển cho nhân viên qua USB hoặc ổ nội bộ.
 - **Khóa không nằm trong mã nguồn.** Khóa dữ liệu được bọc bằng mật khẩu của từng người: PBKDF2-SHA256 600.000 vòng, sau đó AES-256-GCM.
 - **Tại sao không đặt khóa lên GitHub:** ai đọc được repo, hoặc mở được trang trên trình duyệt, đều lấy được khóa, nên dữ liệu coi như công khai. Git cũng giữ lịch sử vĩnh viễn, kể cả khi đã xóa.
-- **Trang không gọi mạng được.** Có CSP `connect-src 'none'`, nên dữ liệu đã giải mã trong trang không gửi ra ngoài được ngay cả khi có mã độc chèn vào.
+- **Bản nhân viên không gọi mạng được.** Có CSP `connect-src 'none'`, nên dữ liệu đã giải mã trong trang không gửi ra ngoài được ngay cả khi có mã độc chèn vào.
+- **Bản admin chỉ gọi đúng một domain Supabase** (`connect-src` ghi rõ domain trong `build.py`), để lưu phiên Điền giá BOQ và nguồn **Kho giá**. Supabase chỉ nhận tài khoản có vai trò admin (RLS `is_admin()`); mật khẩu Supabase được dẫn xuất từ mật khẩu gói admin (PBKDF2, không lưu ở đâu). Mỗi lệnh gọi có hạn 20 giây: mạng treo thì app bỏ qua Kho giá, vẫn chạy với dữ liệu trong gói.
 - **Nhân viên không nhận dữ liệu admin.** Gói nhân viên không chứa khối admin và không chứa khóa admin. Dòng CTG bị lọc bỏ; tên dự án, nhà thầu, file nguồn đã được ẩn trước khi mã hóa.
 - **Gói admin gồm 3 khối, cùng khóa admin:** `db` (Nội bộ + CTG, cột *Nguồn dữ liệu*), `analysis`, `doithu` (đơn giá đối thủ). Gói nhân viên chỉ có `db` Nội bộ đã ẩn nguồn.
 
@@ -30,6 +31,20 @@ Gói dữ liệu mã hóa (`.dgbw`) nằm riêng ở `../6_GOI_DU_LIEU_WEBAPP/`.
 - Nhóm đại diện của đối thủ **trùng tên + đơn vị** với nhóm nội bộ thì vào chung nhóm đó; nhóm chỉ đối thủ có thì thành nhóm mới.
 - Giá chưa quy về năm gốc thì được quy đổi theo hệ số năm học từ chính dữ liệu nội bộ.
 - Nguồn đã có trong khối `db` thì không gộp lần nữa. Ví dụ, gói cũ có khối `ctg` của `modules/ctg/dong_goi.js` mà khối `db` chưa có CTG: khối `ctg` được gộp như đối thủ.
+
+### Bước phân loại cho dữ liệu gộp thêm (Kho giá, Đối thủ, CTG)
+
+Dữ liệu Nội bộ được phân loại khi làm sạch ở `2_XU_LY`. Dòng gộp thêm lúc nạp — nhất là **Kho giá**, chỉ lưu mô tả, đơn vị, đơn giá — **luôn** đi qua một bước phân loại ngay trong `mergeDB` (`classifyNRM2` của `pricing.js`), học từ chính các dòng đã phân loại của dữ liệu đang mở:
+
+| Thuộc tính | Cách xếp, theo thứ tự |
+|---|---|
+| **Nhóm công việc NRM2** | 1. *Khớp tên đã phân loại*: cùng nhóm đại diện hoặc trùng tên với dòng đã phân loại → 2. *Tự động kNN*: tên gần giống các mẫu đã phân loại (7 mẫu gần nhất bỏ phiếu) → 3. *Theo từ khóa*: quy tắc `NRM2_TU_KHOA` (dùng chung với CTG), ưu tiên công việc nêu đầu mô tả |
+| **Loại công việc**, **Cấu kiện** | bước 1 và 2 như trên; không đủ chắc thì để trống |
+
+- Cách xếp nhóm NRM2 ghi vào bộ lọc **Nguồn phân loại NRM2** (*Khớp tên đã phân loại / Tự động kNN / Theo từ khóa*) để rà soát. Dòng không xếp được vào mục *Chưa phân loại*.
+- Nguồn có danh mục NRM2 riêng (CTG đóng gói riêng) được ánh xạ **theo mã**, không theo thứ tự trong danh mục.
+- Lưu / xóa giá dự án trong Kho giá: phân loại lại ngay, khung lưu báo số dòng theo từng cách; bộ lọc đang chọn được giữ nguyên.
+- **Loại hình dự án, Tỉnh/TP của dự án Kho giá** chưa có: bảng `dxg_projects` trên Supabase chỉ lưu tên dự án.
 
 Ba nguồn được dùng ở:
 
@@ -84,7 +99,7 @@ Gửi cho nhân viên: `6_GOI_DU_LIEU_WEBAPP/DonGiaBOQ_nhanvien.dgbw` và `dist/
 
 ### Sau khi kéo bản mới từ GitHub
 
-`build.py` dựng `docs/` từ `../3_WEB_OFFLINE/assets`. Mã giao diện mới nhất nằm ở `docs/assets/`. Vì vậy, trước lần `python build.py` đầu tiên, **chép `docs/assets/app.js`, `app.css`, `dash.js` sang `3_WEB_OFFLINE/assets/`**. Nếu chưa chép, `build.py` dừng lại để bản dựng mới không mất phần ba nguồn.
+`build.py` dựng `docs/` từ `../3_WEB_OFFLINE/assets`. Mã giao diện mới nhất nằm ở `docs/assets/`. Vì vậy, trước lần `python build.py` đầu tiên, **chép các tệp đã đổi ở `docs/assets/` (`app.js`, `app.css`, `dash.js`…) sang `3_WEB_OFFLINE/assets/`**. Nếu chưa chép, `build.py` dừng lại và kể tên tệp: tệp ở `docs/assets` khác và mới hơn tệp cùng tên ở `3_WEB_OFFLINE/assets` thì dựng lại sẽ ghi đè bản mới bằng bản cũ. Khi bản ở `3_WEB_OFFLINE` mới là bản cần dựng, chạy `python build.py --giu-web`.
 
 Không cần sửa `3_WEB_OFFLINE/index.html`. App tự đổi chữ và tự thêm thẻ So sánh nguồn.
 
@@ -109,7 +124,9 @@ Nếu kiểm tra báo "An toàn" thì mới đưa lên. Repo lấy `5_WEBAPP/` l
 1. Chạy `2_XU_LY\CAP_NHAT_DU_LIEU.bat` (làm sạch Nội bộ + CTG, phân tích, dựng `3_WEB_OFFLINE/data/*.js`).
 2. Bấm đúp `PHAT_HANH_GOI_DU_LIEU.bat` (hoặc `python tools/quan_tri_web.py phat-hanh`), nhập tài khoản ADMIN.
 
-Sau đó gửi lại gói `DonGiaBOQ_nhanvien.dgbw` cho nhân viên. Mã giao diện không đổi thì không cần gửi lại zip. Sửa giao diện (`3_WEB_OFFLINE/assets`) thì chạy lại `python build.py`. Sửa module Điền giá BOQ thì chạy `python build.py --module`.
+Sau đó gửi lại gói `DonGiaBOQ_nhanvien.dgbw` cho nhân viên. Mã giao diện không đổi thì không cần gửi lại zip. Sửa giao diện (`3_WEB_OFFLINE/assets`) thì chạy lại `python build.py`. Sửa module Điền giá BOQ hoặc lớp `shared/` thì chạy `python build.py --module`.
+
+Mọi tệp `assets/` và `shared/` trong `index.html` mang `?v=<mã băm nội dung>` do `build.py` gắn: sửa tệp nào thì trình duyệt tải lại đúng tệp đó, không cần tăng số phiên bản bằng tay.
 
 ### Vận hành tài khoản
 
@@ -142,8 +159,10 @@ Tham số `--thu-muc` và `--nguon` có giá trị mặc định, thường khô
 - `build.py` tự chạy kiểm tra đầu ra. Nếu bản dựng chứa khối dữ liệu hoặc tệp `.dgbw`, quá trình dừng lại.
 - Kiểm thử bằng dữ liệu giả lập (cần Node, Python + openpyxl, Chromium của Playwright):
   - `node modules/de_xuat_gia/tests/test_pricing.js`
+  - `node modules/de_xuat_gia/tests/test_pricelib.js`
   - `node modules/de_xuat_gia/tests/test_hoc.js <thư mục tạm>`
   - `node modules/ctg/tests/test_ctg.js <thư mục tạm>`
   - `node modules/ctg/tests/e2e_ctg.js <thư mục tạm>`: ba nguồn trên bản `docs/`.
   - `node modules/de_xuat_gia/tests/e2e_gate.js <thư mục tạm>`
+  - `node modules/de_xuat_gia/tests/e2e_kho.js <thư mục tạm>`: nguồn Kho giá (Supabase giả lập) và bước phân loại NRM2 / loại công việc.
   - `node modules/de_xuat_gia/tests/e2e.js <thư mục tạm>`

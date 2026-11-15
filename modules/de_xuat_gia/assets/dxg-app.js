@@ -1124,7 +1124,13 @@
     const apDung = async () => {
       if (!window.CostCheck) return ' Tải lại trang để áp dụng.';
       const r = await window.CostCheck.napLaiKho();
-      return r.status === 'ok' ? ` Nguồn Kho giá đang dùng ${NF.format(r.dong)} dòng.` : r.status === 'none' ? ' Kho giá hiện trống.' : ` Chưa cập nhật được nguồn Kho giá (${r.why}).`;
+      if (r.status !== 'ok') return r.status === 'none' ? ' Kho giá hiện trống.' : ` Chưa cập nhật được nguồn Kho giá (${r.why}).`;
+      // bước phân loại NRM2 của dòng Kho giá (chỉ lưu mô tả, đơn vị, đơn giá): theo dữ liệu đã phân loại của CSDL
+      const pl = r.phanLoai, n = pl ? pl.khopTen + pl.knn + pl.tuKhoa + pl.chua : 0;
+      const nrm = !n ? '' : ` Phân loại NRM2: ${NF.format(pl.khopTen)} khớp tên đã phân loại, ${NF.format(pl.knn)} tự động kNN, ${NF.format(pl.tuKhoa)} theo từ khóa`
+        + (pl.chua ? `, ${NF.format(pl.chua)} chưa xếp được (lọc "Nhóm công việc NRM2" để rà soát)` : '')
+        + (pl.loaiCV ? `; loại công việc: ${NF.format(pl.loaiCV)} dòng` : '') + '.';
+      return ` Nguồn Kho giá đang dùng ${NF.format(r.dong)} dòng.` + nrm;
     };
     $('#lib-file').addEventListener('change', async ev => {
       const file = ev.target.files[0]; if (!file) return;

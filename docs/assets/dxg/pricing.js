@@ -512,12 +512,21 @@
     dst.projects = dst.projects || [];
     const pOff = dst.projects.length;
     for (const p of src.projects || []) { dst.projects.push(p.slice()); if (Array.isArray(D.p)) D.p.push(p[0]); }
+    // Nhóm NRM2 của src (cột n trỏ vào src.nrm2) → chỉ số trong dst.nrm2 theo MÃ; mã dst chưa có thì thêm vào cuối.
+    // Hai danh mục khác thứ tự mà chép nguyên chỉ số thì xếp sai nhóm. src không có cột n: -1 (chưa phân loại).
+    let nMap = null;
+    if (col(SC, 'n') && Array.isArray(src.nrm2) && src.nrm2.length) {
+      const dn = Array.isArray(dst.nrm2) ? dst.nrm2 : (dst.nrm2 = []);
+      const byCode = new Map(dn.map((x, j) => [String(x[0]), j]));
+      nMap = src.nrm2.map(x => { let j = byCode.get(String(x[0])); if (j === undefined) { dn.push(x.slice()); j = dn.length - 1; byCode.set(String(x[0]), j); } return j; });
+    }
     const keys = Object.keys(C).filter(k => col(C, k));
     for (let i = 0; i < M; i++) {
       const [g, gn] = mapGroup(i);
       for (const k of keys) {
         let v;
         if (k === 'ng') v = ng;
+        else if (k === 'n') { const x = col(SC, 'n') ? SC.n[i] : -1; v = x >= 0 ? (nMap ? (nMap[x] === undefined ? -1 : nMap[x]) : x) : -1; }
         else if (k === 'p') v = col(SC, 'p') && SC.p[i] >= 0 ? pOff + SC.p[i] : -1;
         else if (k === 'g') v = g;
         else if (k === 'gn') v = gn;
@@ -532,7 +541,224 @@
       }
     }
     dst.count = N0 + M;
-    return { dong: M, nhomChung: chung, nhomMoi: moi, lechNam: !!(src.baseYear && dst.baseYear && src.baseYear !== dst.baseYear), quyDoi, khongNam };
+    // Bước phân loại mà dữ liệu Nội bộ đã qua khi làm sạch: dòng gộp thêm còn trống nhóm NRM2 / loại công việc / cấu kiện
+    // (vd Kho giá chỉ lưu mô tả, đơn vị, đơn giá) LUÔN được xếp theo dữ liệu đã phân loại của dst
+    const phanLoai = classifyNRM2(dst, N0);
+    return { dong: M, nhomChung: chung, nhomMoi: moi, lechNam: !!(src.baseYear && dst.baseYear && src.baseYear !== dst.baseYear), quyDoi, khongNam, phanLoai };
+  }
+
+  /* ---------- Phân loại NRM2 cho dòng chưa có nhóm ---------- */
+  // Quy tắc từ khóa theo tên công việc (chữ thường, có dấu): [mã NRM2, mẫu], xét lần lượt, khớp quy tắc đầu tiên.
+  // Thứ tự quan trọng: "tháo dỡ ván khuôn" là cốp pha, "hố ga xây gạch" là thoát nước, "bê tông nhựa" là đường.
+  // Dùng chung với modules/ctg/ctg.js (CTG đóng gói riêng).
+  const NRM2_TU_KHOA = [
+    ['09', 'tường vây|tường dẫn|tường barr?ett?e|barr?ett?e|cừ|kingpost|king post'],
+    ['07', 'cọc(?! tiêu| neo| mốc)|đầu cọc|khoan (?:dẫn|nhồi|tạo lỗ)|nén tĩnh|thử tĩnh|pda|ống siêu âm|ống vách|casa'],
+    ['01', 'huy động|giải thể|biện pháp|lán trại|hàng rào tạm|(?:điện|nước|đường|công trình) tạm|bảo hiểm|vệ sinh công (?:nghiệp|trường)|shoring|chống xiên|khung giằng|thang lên xuống|bạt che|chi phí (?:chung|quản lý)|quan trắc|hoàn công|thí nghiệm'],
+    ['11', 'ván khuôn|cốp ?pha|copha|cốt thép|thép lưới|lưới thép|thép (?:d|ø|φ|cb)\\s?\\d+|d\\d{2}|(?:khoan )?cấy thép|khoan cấy|dự ứng lực|dul|cáp ult|neo cáp|dowel|thanh truyền lực'],
+    ['03', 'phá dỡ|phá bỏ|phá|đập phá|đục phá|cắt phá|tháo dỡ|tháo bỏ|xà bần|đổ bỏ'],
+    ['34', 'hố ga|hố van|cống|mương|rãnh(?: thoát| bê tông| btct)?|thoát nước|thoát sàn|phễu thu|nắp (?:hố|gang|đan|thăm|bể)|bể (?:tự hoại|tách|xlnt|xử lý|phốt|chứa)|đấu nối|ống (?:bê tông|btct)'],
+    ['05', 'đào|đắp (?:đất|cát|trả|hoàn trả|nền|bờ)|đầm (?:đất|cát|chặt|nền)|lấp (?:đất|cát)|vận chuyển đất|đất (?:thừa|đổ|đắp)|hạ mực nước|bóc (?:lớp|đất|hữu cơ)|phát quang|cát (?:lót|đệm)|kè'],
+    ['35', 'bê tông nhựa|btn[cn]?\\s?\\d*|nhựa (?:thấm|dính|lót)|thảm nhựa|cấp phối|cpđd|đá dăm|đá mi|sỏi|vải địa|bó vỉa|vỉa hè|gạch (?:tự chèn|con sâu|terrazzo)|vạch|sơn (?:kẻ|phản quang)|kẻ vạch|gờ giảm tốc|mũi tên|san nền|tôn nền|san lấp|neoweb|chống xói|mặt đường|lề đường|bãi đỗ|ô đậu|đậu xe|chặn (?:xe|bánh xe)|biển báo giao thông'],
+    ['06', 'chống mối|diệt mối|gia cố nền|xử lý nền'],
+    ['18', 'ngói'],
+    ['17', 'tôn|lợp|máng xối|diềm|úp nóc|flashing|tấm lấy sáng|skylight|mái (?:tôn|panel|kính)'],
+    ['19', 'chống thấm|waterstop|băng cản nước|màng (?:khò|bitum|hdpe|chống)|quét chống|(?:chỉ|gờ) ngắt nước'],
+    ['21', 'alu|composite|ốp nhôm|tấm nhôm|lam (?:nhôm|thép|chắn nắng)|louver|mặt dựng'],
+    ['25', 'lan can|tay vịn|cầu thang (?:thép|sắt|inox)|thang (?:khỉ|leo|thép)'],
+    ['31', '(?:sơn|bọc|phun) chống cháy'],
+    // động từ hoàn thiện đứng trước "cửa": "trát má cửa", "sơn cửa" là hoàn thiện; "cửa … sơn tĩnh điện" vẫn là cửa
+    ['28', 'trát|(?<!lanh |ô )tô|cán (?:nền|vữa|sàn)|láng|lát|ốp|len|ron|cắt ron|ngạch'],
+    ['29', 'sơn(?! tĩnh điện)|bả|matit|matít|skim ?coat|phào|gờ chỉ|đắp chỉ|giả gỗ|giả đá|epoxy'],
+    ['20', 'vách(?! kính)|panel|tấm (?:alc|cemboard|xi măng|compact|calcium)|cemboard|compact'],
+    ['14', 'xây|tường (?:gạch|aac|alc|block)|gạch (?:đặc|ống|rỗng|thẻ|block|không nung|nung|bê tông|aac|đinh)|aac|block'],
+    ['15', 'kết cấu thép|khung thép|kèo|xà gồ|bu ?lông|bulong|thép hình|thép hộp|cột thép|dầm thép|bản mã|bản tấm thép|kct|thép [ihcz]\\s?\\d+|ss400'],
+    ['11', 'bê tông|btct|bt lót|lanh tô|giằng tường|bổ trụ|ô văng|xoa nền|phụ gia|bệ máy|kicker|khe (?:co|giãn|dọc|cô lập|nhiệt)|nilon|ni lông|lớp (?:pe|pvc)|grout|parapet'],
+    ['23', 'cửa sổ|vách kính'],
+    ['24', 'cửa'],
+    ['36', 'hàng rào|cổng|barrier|barie|rào chắn|thanh chắn'],
+    ['27', 'kính'],
+    ['31', 'cách nhiệt|cách âm|chống cháy|ngăn cháy|bông (?:thủy tinh|khoáng)|xốp|xps|eps|pir'],
+    ['29', 'trang trí|đề can|decal|chỉ'],
+    ['28', 'gạch|granite|marble|đá (?:mài|ốp|lát|tự nhiên|hoa cương|granite)|sàn (?:gỗ|nhựa|vinyl|nâng)|vinyl|thảm|hardener|tăng cứng|tự san phẳng|vữa|nẹp|mài (?:sàn|nền)|chống trượt'],
+    ['30', 'trần'],
+    ['37', 'cây|trồng|cỏ|hoa|đất (?:trồng|màu)|tiểu cảnh|cảnh quan|chậu'],
+    ['32', 'ghế|bàn|tủ|kệ|quầy|giường|thiết bị|bảng|bản tên|biển|gương|phụ kiện|thùng rác|trò chơi|dụng cụ|rèm|võng|bồn tắm|lavabo|logo|chữ|phòng'],
+    ['38', 'điện|đèn|cáp|máng cáp|ống (?:pvc|hdpe|ppr|upvc|nhựa|gang|thép tráng)|cấp nước|bơm|pccc|chữa cháy|camera|tiếp địa|chống sét|trạm biến áp|ống gió|điều hòa|thông gió|hút bụi|mep'],
+    ['26', 'inox|thép (?:góc|tấm|la|ống|tròn)|chi tiết thép|móc|chống va|bảo vệ góc|ke góc'],
+  ];
+  let nrm2Re = null;   // biên dịch khi dùng lần đầu; trình duyệt cũ không có lookbehind thì bỏ qua bước từ khóa
+  const NRM2_UU_TIEN = 4;   // 4 quy tắc đầu (tường vây, cọc, chi phí chung, cốp pha / cốt thép) luôn thắng khi khớp
+  // -> mã NRM2 ('11', '28'…) theo từ khóa trong tên, null nếu không khớp quy tắc nào.
+  // Mặc định: quy tắc đầu tiên khớp (tên ngắn kiểu CTG). theoViTri = true (mô tả BOQ dài, vd Kho giá): sau các quy tắc
+  // ưu tiên, lấy quy tắc khớp SỚM NHẤT trong tên — công việc chính được nêu đầu mô tả, cụm phụ đứng sau không được thắng
+  // ("Cửa đi thép … ốp 2 mặt" là cửa, "Hàng rào thép hộp, sơn chống rỉ" là hàng rào, "Cây sơn tùng" là cây xanh).
+  function nrm2ByKeyword(name, theoViTri = false) {
+    if (nrm2Re === null) {
+      try { nrm2Re = NRM2_TU_KHOA.map(([ma, s]) => [ma, new RegExp(`(?<![\\p{L}\\p{N}])(?:${s})(?![\\p{L}\\p{N}])`, 'u')]); }
+      catch (e) { nrm2Re = []; }
+    }
+    const s = String(name === null || name === undefined ? '' : name).toLowerCase().normalize('NFC');
+    let best = null, pos = Infinity;
+    for (let k = 0; k < nrm2Re.length; k++) {
+      const [ma, re] = nrm2Re[k];
+      if (!theoViTri || k < NRM2_UU_TIEN) { if (re.test(s)) return ma; continue; }
+      const m = re.exec(s);
+      if (m && m.index < pos) { pos = m.index; best = ma; }
+    }
+    return best;
+  }
+  // Mục "Chưa phân loại" của danh mục NRM2 (mã 00): dòng thuộc mục này coi như chưa có nhóm
+  const nrmChua = x => !x || String(x[0]) === '00' || /chua phan loai/.test(norm(x[1]));
+  const NRM_HOW = { ten: 'Khớp tên đã phân loại', knn: 'Tự động kNN', tk: 'Theo từ khóa' };
+  // Thuộc tính công việc được phân loại: n = nhóm NRM2 (chỉ số DB.nrm2), w = loại công việc, e = cấu kiện (chỉ số từ điển D.w / D.e)
+  const PL_COT = ['n', 'w', 'e'];
+  // Mô hình học từ các dòng ĐÃ phân loại của db (dòng 0..n0-1), cho từng thuộc tính: nhóm đại diện → giá trị đa số,
+  // tên chuẩn hóa → giá trị đa số, và chỉ mục từ → "mẫu" (tên nhóm đại diện / tên dòng chưa có nhóm) cho kNN.
+  // Giữ lại theo n0 để nạp lại Kho giá không phải dựng lại.
+  function nrmModel(db, n0) {
+    const cu = db._nrm, nNrm = Array.isArray(db.nrm2) ? db.nrm2.length : 0;
+    if (cu && cu.n0 === n0 && cu.nrm2 === nNrm) return cu;
+    const C = db.cols, D = db.dicts || {}, hasG = Array.isArray(C.g);
+    const cot = PL_COT.filter(a => Array.isArray(C[a]) && (a === 'n' ? nNrm > 0 : Array.isArray(D[a])));
+    const bad = new Set(); (db.nrm2 || []).forEach((x, k) => { if (nrmChua(x)) bad.add(k); });
+    const vG = {}, vName = {}, first = new Map();
+    for (const a of cot) { vG[a] = new Map(); vName[a] = new Map(); }
+    const vote = (m, k, v) => { let x = m.get(k); if (!x) m.set(k, x = new Map()); x.set(v, (x.get(v) || 0) + 1); };
+    for (let i = 0; i < n0; i++) {
+      let key = null, co = false;
+      const g = hasG ? C.g[i] : -1;
+      for (const a of cot) {
+        const v = C[a][i];
+        if (!(v >= 0) || (a === 'n' && bad.has(v))) continue;
+        if (key === null) key = norm(C.name[i]);
+        if (g >= 0) vote(vG[a], g, v);
+        if (key) vote(vName[a], key, v);
+        co = true;
+      }
+      if (!co) continue;
+      if (g >= 0) { if (!first.has(g)) first.set(g, i); }
+      else if (key && !first.has(key)) first.set(key, i);
+    }
+    const top = v => { let b = -1, bc = 0; if (v) for (const [x, c] of v) if (c > bc) { bc = c; b = x; } return b; };
+    const byG = {}, byName = {};
+    for (const a of cot) {
+      byG[a] = new Map(); byName[a] = new Map();
+      for (const [g, v] of vG[a]) byG[a].set(g, top(v));
+      for (const [k, v] of vName[a]) byName[a].set(k, top(v));
+    }
+    const protos = [], post = new Map();
+    for (const [k, i] of first) {
+      const isG = typeof k === 'number';
+      const ten = isG ? (Array.isArray(C.gn) && C.gn[i] >= 0 && D.gn ? D.gn[C.gn[i]] : D.g ? D.g[k] : C.name[i]) : C.name[i];
+      const tk = new Set(tokens(ten));
+      if (!tk.size) continue;
+      const v = {}; for (const a of cot) { const x = (isG ? byG[a] : byName[a]).get(k); v[a] = x === undefined ? -1 : x; }
+      const id = protos.length;
+      protos.push({ v, tk });
+      for (const t of tk) { let p = post.get(t); if (!p) post.set(t, p = []); p.push(id); }
+    }
+    const P = protos.length || 1, idf = new Map();
+    for (const [t, p] of post) idf.set(t, Math.log(1 + P / p.length));
+    // mảng số (không phải thuộc tính đối tượng) cho vòng lặp kNN: độ dài vectơ IDF của từng mẫu, danh sách mẫu của từng từ
+    const sw = new Float64Array(protos.length);
+    protos.forEach((p, id) => { let w = 0; for (const t of p.tk) { const f = idf.get(t); w += f * f; } sw[id] = Math.sqrt(w) || 1; });
+    for (const [t, p] of post) post.set(t, Int32Array.from(p));
+    const code = new Map((db.nrm2 || []).map((x, k) => [String(x[0]), k]));
+    const M = { n0, nrm2: nNrm, cot, bad, byG, byName, protos, post, idf, sw, maxIdf: Math.log(1 + P) * 1.15, code, acc: new Float64Array(protos.length), cham: new Int32Array(protos.length) };
+    Object.defineProperty(db, '_nrm', { value: M, writable: true, configurable: true, enumerable: false });   // không lọt vào JSON / bản sao
+    return M;
+  }
+  const NRM_GAN = 24;   // số mẫu gần nhất giữ lại cho một tên (mỗi thuộc tính bỏ phiếu bằng 7 mẫu gần nhất có giá trị)
+  // Các mẫu đã phân loại gần tên này nhất: độ giống cosine theo trọng số IDF, từ cao xuống. -> [[độ giống, mẫu]]
+  function nrmNear(M, name) {
+    const tk = new Set(tokens(name));
+    if (!tk.size || !M.protos.length) return [];
+    const acc = M.acc, cham = M.cham, sw = M.sw;
+    let wq = 0, nc = 0;
+    for (const t of tk) {
+      const f = M.idf.get(t) || M.maxIdf, f2 = f * f;   // từ mô hình chưa gặp: coi là rất phân biệt (kéo độ giống xuống)
+      wq += f2;
+      const p = M.post.get(t);
+      if (p) for (let k = 0; k < p.length; k++) { const id = p[k]; if (acc[id] === 0) cham[nc++] = id; acc[id] += f2; }
+    }
+    // chỉ giữ NRM_GAN mẫu giống nhất (chèn vào danh sách đã sắp xếp): từ phổ biến như "bê tông" chạm hàng nghìn mẫu,
+    // sắp xếp hết cho từng dòng thì chậm gấp nhiều lần
+    const near = [], sq = Math.sqrt(wq);
+    let min = 0.3;
+    for (let k = 0; k < nc; k++) {
+      const id = cham[k], sim = acc[id] / (sq * sw[id]);
+      acc[id] = 0;
+      if (sim < min) continue;
+      let j = near.length;
+      near.push(null);
+      while (j > 0 && near[j - 1][0] < sim) { near[j] = near[j - 1]; j--; }
+      near[j] = [sim, M.protos[id]];
+      if (near.length > NRM_GAN) { near.pop(); min = near[NRM_GAN - 1][0]; }
+    }
+    return near;
+  }
+  // kNN cho một thuộc tính: 7 mẫu gần nhất (có giá trị thuộc tính đó) bỏ phiếu theo độ giống. Chỉ nhận khi mẫu gần nhất
+  // của giá trị thắng đủ giống (≥ 0.8), hoặc khá giống (≥ 0.5) và giá trị thắng chiếm ≥ 60% phiếu. -> giá trị, -1 nếu không chắc
+  function nrmKnn(near, a) {
+    const votes = new Map(); let tot = 0, k = 0;
+    for (const [sim, p] of near) { const v = p.v[a]; if (!(v >= 0)) continue; votes.set(v, (votes.get(v) || 0) + sim); tot += sim; if (++k >= 7) break; }
+    if (!k) return -1;
+    let best = -1, bv = 0; for (const [v, x] of votes) if (x > bv) { bv = x; best = v; }
+    const sim = near.find(x => x[1].v[a] === best)[0];
+    return sim >= 0.8 || (sim >= 0.5 && bv / tot >= 0.6) ? best : -1;
+  }
+  // Bước phân loại cho các dòng from..count-1 (dòng vừa gộp thêm: Kho giá, đối thủ, CTG…) — bước mà dữ liệu Nội bộ đã qua
+  // khi làm sạch. Mỗi thuộc tính còn trống của dòng (nhóm NRM2: n < 0 hoặc mục "Chưa phân loại"; loại công việc w, cấu kiện e: < 0)
+  // được xếp lần lượt theo:
+  //   1. Khớp tên đã phân loại — cùng nhóm đại diện, hoặc trùng tên (đã chuẩn hóa) với dòng đã phân loại;
+  //   2. Tự động kNN — tên gần giống các mẫu đã phân loại;
+  //   3. Theo từ khóa — chỉ nhóm NRM2: quy tắc NRM2_TU_KHOA, khi danh mục NRM2 của db có mã đó.
+  // Cách xếp nhóm NRM2 ghi vào cột src ("Nguồn phân loại NRM2") để lọc và rà soát. Dòng không xếp được nhóm NRM2: mục
+  // "Chưa phân loại" của danh mục nếu có, không thì -1. Thuộc tính db không có cột (hoặc chưa có danh mục NRM2) thì bỏ qua.
+  // -> { khopTen, knn, tuKhoa, chua } của nhóm NRM2 + loaiCV, cauKien: số dòng được xếp loại công việc / cấu kiện
+  function classifyNRM2(db, from = 0) {
+    const C = db.cols, out = { khopTen: 0, knn: 0, tuKhoa: 0, chua: 0, loaiCV: 0, cauKien: 0 };
+    const D = db.dicts = db.dicts || {}, nNrm = Array.isArray(db.nrm2) ? db.nrm2.length : 0;
+    const cot = PL_COT.filter(a => Array.isArray(C[a]) && (a === 'n' ? nNrm > 0 : Array.isArray(D[a])));
+    if (!cot.length) return out;
+    const hasG = Array.isArray(C.g), bad = new Set(); (db.nrm2 || []).forEach((x, k) => { if (nrmChua(x)) bad.add(k); });
+    const trong = (a, i) => !(C[a][i] >= 0) || (a === 'n' && bad.has(C[a][i]));
+    let M = null, chuaIdx = -2;   // mô hình chỉ dựng khi có dòng cần phân loại
+    const memo = new Map(), lab = {};
+    const ghiCach = (i, how) => {
+      if (!Array.isArray(C.src)) { C.src = new Array(db.count).fill(-1); if (!Array.isArray(D.src)) D.src = []; }
+      if (lab[how] === undefined) { let k = D.src.indexOf(NRM_HOW[how]); if (k < 0) { D.src.push(NRM_HOW[how]); k = D.src.length - 1; } lab[how] = k; }
+      C.src[i] = lab[how];
+    };
+    for (let i = from; i < db.count; i++) {
+      const can = cot.filter(a => trong(a, i));
+      if (!can.length) continue;
+      M = M || nrmModel(db, from);
+      const g = hasG ? C.g[i] : -1, key = norm(C.name[i]);
+      let r = memo.get(key);   // theo tên: { a: [giá trị, cách] }, tính khi cần
+      if (!r) memo.set(key, r = {});
+      let near = null;
+      for (const a of can) {
+        let v = -1, how = 'ten';
+        if (g >= 0 && M.byG[a].has(g)) v = M.byG[a].get(g);
+        else {
+          if (!r[a]) {
+            let x = M.byName[a].has(key) ? M.byName[a].get(key) : -1, h = 'ten';
+            if (x < 0) { near = near || nrmNear(M, C.name[i]); x = nrmKnn(near, a); h = 'knn'; }
+            if (x < 0 && a === 'n') { const k = M.code.get(nrm2ByKeyword(C.name[i], true)); x = k === undefined || M.bad.has(k) ? -1 : k; h = 'tk'; }
+            r[a] = [x, h];
+          }
+          [v, how] = r[a];
+        }
+        if (a !== 'n') { if (v >= 0) { C[a][i] = v; out[a === 'w' ? 'loaiCV' : 'cauKien']++; } continue; }
+        if (v >= 0) { C.n[i] = v; ghiCach(i, how); out[how === 'ten' ? 'khopTen' : how === 'knn' ? 'knn' : 'tuKhoa']++; continue; }
+        if (chuaIdx === -2) chuaIdx = db.nrm2.findIndex(x => String(x[0]) === '00');
+        C.n[i] = chuaIdx;
+        out.chua++;
+      }
+    }
+    return out;
   }
   // Dòng thuộc nguồn đang bị tắt (f.srcOff: Set nhãn nguồn) — lọc cứng, không bao giờ nới
   const srcOff = (IX, i, f) => !!(f.srcOff && f.srcOff.size && IX.has('ng') && f.srcOff.has(IX.D.ng[IX.C.ng[i]]));
@@ -929,5 +1155,5 @@
     return out;
   }
 
-  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, tagSource, hasSource, mergeDB, yearFactors, poolCands, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, judgeBaseline, judgePrice, auditBoq, diff, toNum, COLS, PROP_HEAD };
+  return { norm, tokens, setSynonyms, learnKey, resolveGroup, applyLearn, mergeLearn, tagSource, hasSource, mergeDB, classifyNRM2, nrm2ByKeyword, yearFactors, poolCands, parseUnit, UNIT_BASES, unitRatio, qtile, percentRank, buildIndex, match, groupStats, rowPass, STRATEGY, confidence, detectColumns, extractLines, matchBaseline, judgeBaseline, judgePrice, auditBoq, diff, toNum, COLS, PROP_HEAD };
 });
