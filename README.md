@@ -44,7 +44,7 @@ Dữ liệu Nội bộ được phân loại khi làm sạch ở `2_XU_LY`. Dòn
 - Cách xếp nhóm NRM2 ghi vào bộ lọc **Nguồn phân loại NRM2** (*Khớp tên đã phân loại / Tự động kNN / Theo từ khóa*) để rà soát. Dòng không xếp được vào mục *Chưa phân loại*.
 - Nguồn có danh mục NRM2 riêng (CTG đóng gói riêng) được ánh xạ **theo mã**, không theo thứ tự trong danh mục.
 - Lưu / xóa giá dự án trong Kho giá: phân loại lại ngay, khung lưu báo số dòng theo từng cách; bộ lọc đang chọn được giữ nguyên.
-- **Loại hình dự án, Tỉnh/TP của dự án Kho giá** chưa có: bảng `dxg_projects` trên Supabase chỉ lưu tên dự án.
+- **Loại hình dự án, Tỉnh/TP** là thuộc tính của dự án, không suy ra được từ mô tả công việc: nhập ở khung lưu giá (hai ô cạnh tên dự án, có gợi ý theo các giá trị đang dùng trong dữ liệu), lưu vào `dxg_projects.loai_hinh`, `tinh` (`modules/de_xuat_gia/sql/003_dxg_projects_loai_hinh_tinh.sql`). Dự án đã lưu sửa được bằng nút **Cập nhật loại hình / tỉnh**, không cần nạp lại file.
 
 Ba nguồn được dùng ở:
 

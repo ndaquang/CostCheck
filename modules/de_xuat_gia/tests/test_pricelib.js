@@ -35,7 +35,8 @@ console.log('test_pricelib OK');
 // toDB + mergeDB (nguồn "Kho giá" gộp vào CSDL)
 const X = require('../assets/pricing.js'), { makeDB } = require('./fixture_db.js');
 const db = makeDB(); const n0 = db.count;
-const kho = P.toDB(rows.map(r => ({ ...r, project_id: 'abcd1234-0', created_at: '2026-11-11T00:00:00Z' })), [{ id: 'abcd1234-0', name: 'Dự án Gremsy' }]);
+const kho = P.toDB(rows.map(r => ({ ...r, project_id: 'abcd1234-0', created_at: '2026-11-11T00:00:00Z' })), [{ id: 'abcd1234-0', name: 'Dự án Gremsy', loai_hinh: 'Nhà xưởng', tinh: 'TP Hồ Chí Minh' }]);
+assert.deepStrictEqual(kho.projects[0].slice(1, 5), ['Dự án Gremsy', 'Nhà xưởng', '', 'TP Hồ Chí Minh']);   // loại hình, tỉnh (2025) vào bộ lọc của app
 const r = X.mergeDB(db, kho, 'Kho giá');
 assert.strictEqual(r.dong, 4); assert.strictEqual(db.count, n0 + 4);
 assert.ok(X.hasSource(db, 'Kho giá'));

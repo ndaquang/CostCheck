@@ -111,10 +111,12 @@
       && (f.min == null || r.unit_price >= f.min) && (f.max == null || r.unit_price <= f.max));
   }
   /* Dòng Supabase → khối dữ liệu cùng định dạng window.DB, để mergeDB gộp thành nguồn "Kho giá" của app tra cứu.
-   * rows: { project_id, description, unit_raw, unit_norm, unit_price, created_at }; projects: [{ id, name }] */
+   * rows: { project_id, description, unit_raw, unit_norm, unit_price, created_at }; projects: [{ id, name, loai_hinh, tinh }]
+   * Dự án: [mã, tên, loại hình, tỉnh (trước sáp nhập), tỉnh (2025), CĐT] — loai_hinh, tinh của dự án Kho giá vào bộ lọc
+   * "Loại hình dự án" và "Tỉnh/TP (sau sáp nhập 2025)" của app tra cứu. */
   function toDB(rows, projects) {
     const pIdx = new Map(), prj = [];
-    for (const p of projects || []) { pIdx.set(p.id, prj.length); prj.push([String(p.id).slice(0, 8), p.name, '', '', '', '']); }
+    for (const p of projects || []) { pIdx.set(p.id, prj.length); prj.push([String(p.id).slice(0, 8), p.name, p.loai_hinh || '', '', p.tinh || '', '']); }
     const D = { u: [], cu: [], g: [], gn: [] }, ix = {}, gm = new Map();
     const idx = (k, v) => { const m = ix[k] || (ix[k] = new Map()); let j = m.get(v); if (j === undefined) { D[k].push(v); j = D[k].length - 1; m.set(v, j); } return j; };
     const C = { name: [], spec: [], u: [], cu: [], g: [], gn: [], p26: [], cp: [], tot: [], y: [], p: [], mat: [], lab: [] };

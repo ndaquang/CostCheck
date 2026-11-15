@@ -49,6 +49,7 @@ const coNRM = db => {
   const PID = '11111111-2222-3333-4444-555555555555';
   const dong = (d, u, gia) => ({ id: 'r' + Math.random(), project_id: PID, description: d, desc_search: d.toLowerCase(), unit_raw: u, unit_norm: u, multi_unit: false, unit_price: gia, source_file: 'kho.xlsx', created_at: '2026-11-11T00:00:00Z' });
   let kho = [dong('Bê tông móng M300 đá 1x2', 'm3', 1700000), dong('Sơn nước tường ngoài nhà 2 lớp phủ', 'm2', 70000), dong('Cửa đi thép chống cháy 2 cánh', 'bộ', 9500000), dong('Hạng mục xyz không rõ', 'm2', 12345)];
+  const duAn = { id: PID, name: 'Dự án mới', loai_hinh: 'Nhà xưởng', tinh: null, created_at: '2026-11-11T00:00:00Z' };
   const token = ['x', Buffer.from(JSON.stringify({ app_metadata: { role: 'admin' } })).toString('base64url'), 'x'].join('.');
   const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' };
   const srv = serve(DOCS), base = `http://127.0.0.1:${srv.address().port}/index.html`;
@@ -60,7 +61,10 @@ const coNRM = db => {
     const req = route.request(), u = new URL(req.url()), json = (body, status = 200) => route.fulfill({ status, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
     if (u.pathname === '/auth/v1/token') return json({ access_token: token, refresh_token: 'r', expires_in: 3600, user: { email: 'admin@example.com' } });
-    if (u.pathname === '/rest/v1/dxg_projects') return json([{ id: PID, name: 'Dự án mới', created_at: '2026-11-11T00:00:00Z' }]);
+    if (u.pathname === '/rest/v1/dxg_projects') {
+      if (req.method() === 'PATCH') Object.assign(duAn, JSON.parse(req.postData()));   // sửa loại hình / tỉnh
+      return json([duAn]);
+    }
     if (u.pathname === '/rest/v1/dxg_price_lookup_latest') return json(+u.searchParams.get('offset') ? [] : kho);
     return json([]);
   });
@@ -103,6 +107,17 @@ const coNRM = db => {
   check(r2.length === kho.length && r2[4][1] === '30' && r2[4][3] === 'Trần' && r2[5][1] === '28' && r2[5][3] === 'Lát', `dòng mới cũng được phân loại: ${r2[4][0]} → ${r2[4][1]} / ${r2[4][3]}, ${r2[5][0]} → ${r2[5][1]} / ${r2[5][3]}`);
   const sau = await chips(page);
   check(JSON.stringify(sau) === JSON.stringify(truoc) && await dem(page) === db.count + kho.length, `giữ bộ lọc đang chọn (${sau.join(', ')}), đối thủ vẫn ẩn: ${await dem(page)} dòng`);
+  console.log('loại hình dự án / tỉnh của dự án Kho giá');
+  const daKho = () => page.evaluate(() => { const D = window.DB, i = D.cols.ng.lastIndexOf(D.dicts.ng.indexOf('Kho giá')), p = D.projects[D.cols.p[i]]; return [p[1], p[2], p[4]]; });
+  check(JSON.stringify(await daKho()) === JSON.stringify(['Dự án mới', 'Nhà xưởng', '']), 'dự án Kho giá mang loại hình đã lưu: ' + (await daKho()).join(' | '));
+  await page.click('.topnav [data-sec="dien-gia"]'); await page.waitForSelector('#step-lib:not([hidden])', { timeout: 20000 });
+  await page.waitForFunction(() => document.querySelector('#lib-q-proj') && document.querySelector('#lib-q-proj').options.length > 1);
+  await page.fill('#lib-proj', 'Dự án mới'); await page.dispatchEvent('#lib-proj', 'change');
+  check(await page.inputValue('#lib-type') === 'Nhà xưởng', 'chọn dự án đã lưu: điền sẵn loại hình đang lưu');
+  await page.fill('#lib-type', 'Văn phòng'); await page.fill('#lib-prov', 'Đồng Nai');
+  await page.click('#lib-info');
+  await page.waitForFunction(() => /Đã cập nhật loại hình/.test(document.querySelector('#lib-st').textContent), null, { timeout: 20000 });
+  check(JSON.stringify(await daKho()) === JSON.stringify(['Dự án mới', 'Văn phòng', 'Đồng Nai']), 'sửa loại hình / tỉnh không cần nạp lại file: ' + (await daKho()).join(' | ') + ' — ' + (await page.textContent('#lib-st')).trim().slice(0, 150));
   check(!errs.length, 'không lỗi trang / CSP' + (errs.length ? ': ' + errs.join(' | ') : ''));
 
   await browser.close(); srv.close();

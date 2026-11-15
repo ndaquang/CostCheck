@@ -12,7 +12,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://jzwmzpwcpjvhpylkhapg.supabase.co; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <link rel="stylesheet" href="shared/gate.css?v=5e301ca1">
 <link rel="stylesheet" href="shared/secure-ui.css?v=7efba556">
-<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v=14507a84"><!--/DXG-->
+<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v=057c845e"><!--/DXG-->
 </head>
 <body>
 <div id="splash">
@@ -205,15 +205,18 @@
   <!-- Kho đơn giá tra cứu (Supabase) -->
   <section class="card" id="step-lib" hidden>
     <h2>Lưu đơn giá dự án lên Supabase</h2>
-    <p class="muted small">Nạp file tổng hợp có sheet <b>PHAN TICH THEO MA</b>; chỉ lưu <b>mô tả, đơn vị, đơn giá</b>. Mã nhiều đơn vị lấy các dòng chi tiết ở sheet <b>TONG HOP CHI TIET</b>; mã có đơn giá = 0 bỏ qua. Lưu xong, nguồn <b>Kho giá</b> được cập nhật ngay cho Tra cứu, Điểm rơi giá, Phân tích và Điền giá BOQ. Lưu lại cùng tên dự án sẽ thay giá cũ của dự án đó.</p>
+    <p class="muted small">Nạp file tổng hợp có sheet <b>PHAN TICH THEO MA</b>; chỉ lưu <b>mô tả, đơn vị, đơn giá</b>. Mã nhiều đơn vị lấy các dòng chi tiết ở sheet <b>TONG HOP CHI TIET</b>; mã có đơn giá = 0 bỏ qua. Lưu xong, nguồn <b>Kho giá</b> được cập nhật ngay cho Tra cứu, Điểm rơi giá, Phân tích và Điền giá BOQ. Lưu lại cùng tên dự án sẽ thay giá cũ của dự án đó. <b>Loại hình dự án</b> và <b>Tỉnh/TP</b> ghi theo dự án; mỗi dòng giá được tự xếp <b>nhóm NRM2, loại công việc, cấu kiện</b> theo dữ liệu đã phân loại.</p>
     <div class="lib-row">
       <input id="lib-proj" list="lib-projs" placeholder="Tên dự án (vd: Dự án Gremsy)" value="Dự án Gremsy"><datalist id="lib-projs"></datalist>
+      <input id="lib-type" list="lib-types" placeholder="Loại hình dự án" title="Loại hình dự án (vd: Nhà xưởng) — vào bộ lọc Loại hình dự án"><datalist id="lib-types"></datalist>
+      <input id="lib-prov" list="lib-provs" placeholder="Tỉnh/TP" title="Tỉnh/TP sau sáp nhập 2025 — vào bộ lọc Tỉnh/TP"><datalist id="lib-provs"></datalist>
       <label class="btn pick"><input type="file" id="lib-file" accept=".xlsx,.xlsm" hidden>Chọn file tổng hợp…</label>
       <button class="btn primary" id="lib-save" disabled>Lưu vào Supabase</button>
     </div>
     <div class="lib-row">
       <select id="lib-q-proj"></select>
       <button class="btn" id="lib-del" disabled title="Xóa toàn bộ đơn giá của dự án đang chọn">Xóa giá dự án</button>
+      <button class="btn" id="lib-info" title="Ghi Loại hình dự án và Tỉnh/TP ở trên cho dự án có tên trong ô Tên dự án (không cần nạp lại file)">Cập nhật loại hình / tỉnh</button>
       <span class="muted small" id="lib-st"></span>
     </div>
   </section>
@@ -285,6 +288,6 @@
   <div id="dw-body"></div>
 </aside></template><!--/DXG-->
 <script src="shared/crypto-web.js?v=fff1f13d"></script>
-<script src="shared/secure.js?v=bf502a6c" data-build="admin" data-scripts="shared/secure-ui.js?v=21538b14,assets/xlsx-lite.js?v=820834d3,assets/charts.js?v=91262b1a,assets/dash.js?v=1d170208,assets/dxg/pricing.js?v=60180219,assets/app.js?v=6e869a5c,assets/dxg/price-lib.js?v=1cc514d1,assets/dxg/xlsx-io.js?v=3797594c,assets/dxg/cloud.js?v=87407ac8,assets/dxg/dxg-app.js?v=2d3e1779"></script>
+<script src="shared/secure.js?v=bf502a6c" data-build="admin" data-scripts="shared/secure-ui.js?v=21538b14,assets/xlsx-lite.js?v=820834d3,assets/charts.js?v=91262b1a,assets/dash.js?v=1d170208,assets/dxg/pricing.js?v=60180219,assets/app.js?v=6e869a5c,assets/dxg/price-lib.js?v=fd2b813b,assets/dxg/xlsx-io.js?v=3797594c,assets/dxg/cloud.js?v=355b0828,assets/dxg/dxg-app.js?v=4f5fe971"></script>
 </body>
 </html>

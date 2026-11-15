@@ -1111,12 +1111,23 @@
     const PL = window.PriceLib; if (!PL || !$('#step-lib')) return;
     $('#step-lib').hidden = false;
     const st = t => { $('#lib-st').textContent = t; };
-    let pending = null, projects = [], counts = new Map();
+    let pending = null, projects = [], all = [], counts = new Map();
+    const duAn = () => { const k = $('#lib-proj').value.trim().toLowerCase(); return all.find(p => p.name.trim().toLowerCase() === k); };
+    const thongTin = () => ({ loai_hinh: $('#lib-type').value, tinh: $('#lib-prov').value });
+    // chọn dự án đã có: điền sẵn loại hình / tỉnh đang lưu
+    const dienThongTin = () => { const p = duAn(); if (p) { $('#lib-type').value = p.loai_hinh || ''; $('#lib-prov').value = p.tinh || ''; } };
     const refresh = async () => {
       const [ps, rows] = await Promise.all([C.listProjects(), C.loadPrices()]);
       counts = new Map(); for (const r of rows) counts.set(r.project_id, (counts.get(r.project_id) || 0) + 1);
       projects = ps.filter(p => counts.has(p.id));
+      all = ps;
       $('#lib-projs').innerHTML = ps.map(p => `<option value="${esc(p.name)}">`).join('');
+      // gợi ý loại hình / tỉnh: các giá trị đang có trong dữ liệu (để cùng cách ghi với bộ lọc) + của các dự án Kho giá
+      const P = (window.DB && window.DB.projects) || [];
+      const goiY = vals => [...new Set(vals.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi')).map(v => `<option value="${esc(v)}">`).join('');
+      $('#lib-types').innerHTML = goiY([...P.map(p => p[2]), ...ps.map(p => p.loai_hinh)]);
+      $('#lib-provs').innerHTML = goiY([...P.map(p => p[4] || p[3]), ...ps.map(p => p.tinh)]);
+      dienThongTin();
       $('#lib-q-proj').innerHTML = `<option value="">— dự án đã lưu (${projects.length}) —</option>` + projects.map(p => `<option value="${p.id}">${esc(p.name)} · ${NF.format(counts.get(p.id))} dòng</option>`).join('');
       $('#lib-del').disabled = true;
     };
@@ -1152,13 +1163,22 @@
       if (!confirm(`Lưu ${pending.rows.length} dòng vào dự án "${name}" trên Supabase?`)) return;
       $('#lib-save').disabled = true;
       try {
-        const p = await C.ensureProject(name); const r = await C.savePrices(p.id, pending.file, pending.rows);
+        const p = await C.ensureProject(name, thongTin()); const r = await C.savePrices(p.id, pending.file, pending.rows);
         pending = null; st(`Đã lưu ${NF.format(r.count)} dòng vào "${name}". Đang cập nhật nguồn Kho giá…`);
         const t = await apDung(); await refresh();
         st(`Đã lưu ${NF.format(r.count)} dòng vào "${name}".` + t);
       } catch (e) { st('Lỗi lưu: ' + (e.message || e)); $('#lib-save').disabled = !pending; }
     });
     $('#lib-q-proj').addEventListener('change', () => { $('#lib-del').disabled = !$('#lib-q-proj').value; });
+    $('#lib-proj').addEventListener('change', dienThongTin);
+    // sửa loại hình / tỉnh của dự án đã lưu mà không nạp lại file
+    $('#lib-info').addEventListener('click', async () => {
+      const p = duAn(); if (!p) { st('Chưa có dự án tên này trên Supabase. Nhập đúng tên dự án đã lưu, hoặc lưu giá trước.'); return; }
+      $('#lib-info').disabled = true;
+      try { await C.updateProject(p.id, thongTin()); const t = await apDung(); await refresh(); st(`Đã cập nhật loại hình / tỉnh của "${p.name}".` + t); }
+      catch (e) { st('Lỗi cập nhật: ' + (e.message || e)); }
+      $('#lib-info').disabled = false;
+    });
     $('#lib-del').addEventListener('click', async () => {
       const pid = $('#lib-q-proj').value, p = projects.find(x => x.id === pid); if (!p) return;
       if (!confirm(`Xóa toàn bộ đơn giá của dự án "${p.name}" (${NF.format(counts.get(pid) || 0)} dòng, kể cả các lô cũ) khỏi Supabase?\nKhông hoàn tác được.`)) return;

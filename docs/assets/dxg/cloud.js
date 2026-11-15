@@ -39,6 +39,16 @@
   }
   const rest = async (path, opt) => raw('/rest/v1/' + path, opt, await bearer());
 
+  // { loai_hinh, tinh } đã gọn khoảng trắng; ô để trống: bỏ qua (giuRong = false) hoặc ghi null (giuRong = true, khi sửa)
+  function thongTin(info, giuRong) {
+    const out = {};
+    for (const c of ['loai_hinh', 'tinh']) {
+      if (!info || info[c] === undefined) continue;
+      const v = String(info[c] === null ? '' : info[c]).replace(/\s+/g, ' ').trim().slice(0, 100);
+      if (v) out[c] = v; else if (giuRong) out[c] = null;
+    }
+    return out;
+  }
   window.DXGCloud = {
     get email() { return email; },
     get signedIn() { return !!tok; },
@@ -58,9 +68,15 @@
       await this.login(mail, secret);
     },
     logout() { tok = refresh = null; exp = 0; email = ''; },
-    listProjects() { return rest('dxg_projects?select=id,name,created_at&archived=eq.false&order=name.asc'); },
-    async createProject(name) {
-      const r = await rest('dxg_projects', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ name }) });
+    listProjects() { return rest('dxg_projects?select=id,name,loai_hinh,tinh,created_at&archived=eq.false&order=name.asc'); },
+    // info: { loai_hinh, tinh } — loại hình dự án và Tỉnh/TP (sql/003), cho bộ lọc của nguồn Kho giá; không truyền thì để trống
+    async createProject(name, info) {
+      const r = await rest('dxg_projects', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ name, ...thongTin(info) }) });
+      return r[0];
+    },
+    // Sửa loại hình / tỉnh của dự án (chỉ hai cột này sửa được qua API; chuỗi rỗng = xóa giá trị)
+    async updateProject(id, info) {
+      const r = await rest('dxg_projects?id=eq.' + encodeURIComponent(id), { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify(thongTin(info, true)) });
       return r[0];
     },
     async saveVersion(projectId, fileName, payload) {
@@ -70,9 +86,13 @@
     },
     listVersions(projectId) { return rest(`dxg_versions?select=id,version,file_name,item_count,created_at&project_id=eq.${encodeURIComponent(projectId)}&order=version.desc&limit=50`); },
     // ---- Kho đơn giá tra cứu (sheet "PHAN TICH THEO MA"): mỗi lần lưu là một lô mới, không ghi đè ----
-    async ensureProject(name) {
+    // Dự án theo tên (không phân biệt hoa thường), chưa có thì tạo. Có info khác với thông tin đang lưu thì cập nhật.
+    async ensureProject(name, info) {
       const ps = await this.listProjects(), k = String(name).trim().toLowerCase();
-      return ps.find(p => p.name.trim().toLowerCase() === k) || this.createProject(String(name).trim());
+      const p = ps.find(x => x.name.trim().toLowerCase() === k);
+      if (!p) return this.createProject(String(name).trim(), info);
+      const moi = thongTin(info);
+      return Object.keys(moi).some(c => moi[c] !== (p[c] || null)) ? (await this.updateProject(p.id, moi)) || p : p;
     },
     async savePrices(projectId, fileName, rows) {
       const batch = (crypto.randomUUID && crypto.randomUUID()) || ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
