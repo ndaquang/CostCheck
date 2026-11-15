@@ -38,7 +38,7 @@ File cần có sheet **DATABASE** với các cột: Tên công việc, Đơn v�
 | Dòng giữ lại | có Tên công việc và Tổng cộng > 0. Dòng khấu trừ (âm) bị bỏ và được liệt kê khi chạy |
 | Đơn vị | gộp các cách ghi: nos / nr / ea / pcs → cái; set → bộ; lot / ls / item / trọn gói → gói; md → m; ton → tấn… |
 | Nhóm đại diện | cùng tên công việc (đã chuẩn hóa dấu, khoảng trắng) + cùng đơn vị. Tên nhóm là cách ghi được nhiều dự án dùng nhất |
-| Nhóm NRM2 | xếp theo từ khóa trong tên công việc (`QUY_TAC` trong `ctg.js`). Tên không khớp từ khóa nào thì xếp theo tiền tố "Mã công tác link" (MC.FW → 11, INF.MH → 34…). Còn lại là "00 · Chưa phân loại" (khoảng 3% với file hiện tại) |
+| Nhóm NRM2 | xếp theo từ khóa trong tên công việc (`NRM2_TU_KHOA` trong `modules/de_xuat_gia/assets/pricing.js`, dùng chung với bước phân loại khi gộp nguồn). Tên không khớp từ khóa nào thì xếp theo tiền tố "Mã công tác link" (MC.FW → 11, INF.MH → 34…). Còn lại là "00 · Chưa phân loại" (khoảng 3% với file hiện tại) |
 | Cảnh báo giá | dòng lệch quá 3 lần trung vị nhóm, chỉ xét nhóm từ 4 báo giá |
 | Năm | lấy từ cột Năm. Khối `ctg` **giữ giá gốc theo file CTG**. Khi gộp vào dữ liệu nội bộ, app quy giá về năm gốc theo hệ số năm của dữ liệu nội bộ; dòng không rõ năm giữ giá gốc |
 

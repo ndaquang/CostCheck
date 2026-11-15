@@ -47,6 +47,6 @@
   // Tự đăng xuất sau 60 phút không thao tác
   let idle;
   const reset = () => { clearTimeout(idle); idle = setTimeout(() => S.logout(), 60 * 60 * 1000); };
-  ['mousemove', 'keydown', 'wheel', 'click'].forEach(ev => document.addEventListener(ev, reset, { passive: true }));
+  ['mousemove', 'keydown', 'wheel', 'click', 'touchstart'].forEach(ev => document.addEventListener(ev, reset, { passive: true }));   // touchstart: vuốt trên máy tính bảng cũng là thao tác
   reset();
 })();

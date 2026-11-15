@@ -16,7 +16,10 @@ App tra cứu gộp đối thủ vào khi nạp bằng mergeDB của modules/de_
 
 Hai bản chỉ chứa MÃ. Không sao chép 3_WEB_OFFLINE/data và không sao chép gói dữ liệu.
 Dùng: python build.py              dựng app tra cứu + ghép module
-      python build.py --module     chỉ ghép lại module vào bản đã dựng (không cần thư mục 3_WEB_OFFLINE)
+      python build.py --giu-web    như trên, bỏ qua kiểm tra "docs/assets mới hơn 3_WEB_OFFLINE/assets" (xem kiem_tra_web)
+      python build.py --module     chỉ ghép lại module + lớp shared/ vào bản đã dựng (không cần thư mục 3_WEB_OFFLINE)
+
+Mọi tệp assets/ và shared/ trong index.html mang ?v=<mã băm nội dung> (gan_phien_ban): sửa tệp nào thì trình duyệt tải lại tệp đó.
 """
 import hashlib
 import os
@@ -71,7 +74,7 @@ def dung_ban(thu_muc, vai_tro):
     assert len(re.findall(r'<script src="assets/[^"]+"></script>', src)) >= 4, "index.html thiếu script ứng dụng (kiểm tra 3_WEB_OFFLINE/index.html)"
     out = gan_cong_bao_ve(src, vai_tro, "shared")
 
-    out = gan_dien_gia(out, thu_muc, vai_tro)
+    out = gan_phien_ban(gan_dien_gia(out, thu_muc, vai_tro), thu_muc)
 
     with open(os.path.join(thu_muc, "index.html"), "w", encoding="utf-8") as fh:
         fh.write(out)
@@ -104,6 +107,20 @@ def kiem_tra_web():
         sys.exit("DỪNG: 3_WEB_OFFLINE/assets chưa có bản app gộp nguồn (Nội bộ / CTG / Đối thủ cho Điểm rơi giá và Phân tích). "
                  "Chép docs/assets/app.js, app.css, dash.js sang 3_WEB_OFFLINE/assets/ rồi chạy lại, "
                  "nếu không bản dựng mới sẽ mất các chức năng này.")
+    # Tổng quát hơn: docs/assets là bản đang chạy trên GitHub Pages và được sửa trực tiếp trong repo. Tệp ở docs/ KHÁC và
+    # MỚI HƠN tệp cùng tên ở 3_WEB_OFFLINE/assets (thường là vừa kéo bản mới từ GitHub) thì dựng lại sẽ ghi đè bản mới bằng bản cũ.
+    if "--giu-web" in sys.argv:
+        return
+    chuan = lambda p: open(p, "rb").read().replace(b"\r\n", b"\n")
+    moi = []
+    for f in sorted(os.listdir(os.path.join(WEB, "assets"))):
+        a, b = os.path.join(WEB, "assets", f), os.path.join(DOCS, "assets", f)
+        if os.path.isfile(a) and os.path.isfile(b) and os.path.getmtime(b) > os.path.getmtime(a) and chuan(a) != chuan(b):
+            moi.append(f)
+    if moi:
+        sys.exit("DỪNG: docs/assets có tệp khác và mới hơn 3_WEB_OFFLINE/assets: " + ", ".join(moi) + ".\n"
+                 "  • Vừa kéo bản mới từ GitHub: chép các tệp này từ docs/assets sang 3_WEB_OFFLINE/assets rồi chạy lại.\n"
+                 "  • Bản ở 3_WEB_OFFLINE mới là bản cần dựng: python build.py --giu-web")
 
 
 def css_trong_muc(css, goc="#sec-dxg"):
@@ -175,13 +192,26 @@ def gan_dien_gia(html, thu_muc, vai_tro, cho_nhan_vien=None):
     giao_dien = re.search(r'<main class="wrap">.*?</main>', src, re.S).group(0) + "\n" + re.search(r'<aside id="dxg-drawer".*?</aside>', src, re.S).group(0)
     nl = "\r\n" if "\r\n" in html else "\n"
     html = html.replace("</head>", f'<!--DXG--><link rel="stylesheet" href="assets/dxg/dxg-embed.css?v={v}"><!--/DXG-->{nl}</head>', 1)
-    html = re.sub(r'(<script src="[^"]*crypto-web\.js")', lambda m: f'<!--DXG--><template id="dxg-tpl">{giao_dien}</template><!--/DXG-->{nl}' + m.group(1), html, count=1)
+    html, co_tpl = re.subn(r'(<script src="[^"]*crypto-web\.js[^"]*")', lambda m: f'<!--DXG--><template id="dxg-tpl">{giao_dien}</template><!--/DXG-->{nl}' + m.group(1), html, count=1)
+    assert co_tpl == 1, "index.html thiếu thẻ script crypto-web.js — không chèn được giao diện Điền giá BOQ"
     # pricing.js nạp TRƯỚC app.js: app tra cứu dùng mergeDB để gộp nguồn đối thủ / CTG vào dữ liệu nội bộ
     truoc = f",assets/dxg/pricing.js?v={v}"
     html, co_app = re.subn(r'(data-scripts="[^"]*?)(,assets/app\.js)', lambda m: m.group(1) + truoc + m.group(2), html, count=1)
     them = "".join(f",assets/dxg/{f}?v={v}" for f in DXG_JS if co_app == 0 or f != "pricing.js")
     html = re.sub(r'(data-scripts="[^"]*)"', lambda m: m.group(1) + them + '"', html, count=1)
     return html
+
+
+def gan_phien_ban(html, thu_muc):
+    """Gắn ?v=<8 ký tự sha1 NỘI DUNG tệp> cho mọi tệp assets/ và shared/ mà index.html nạp (thẻ link, script, data-scripts).
+    Số phiên bản đặt tay (?v=10) không đổi khi sửa tệp, nên trình duyệt có thể chạy app.js cũ với pricing.js mới.
+    Xuống dòng CRLF / LF cho cùng một mã băm, để dựng trên Windows hay Linux không làm đổi index.html."""
+    def doi(m):
+        p = os.path.join(thu_muc, *m.group(1).split("/"))
+        if not os.path.isfile(p):
+            return m.group(0)
+        return f"{m.group(1)}?v={hashlib.sha1(open(p, 'rb').read().replace(b'\r\n', b'\n')).hexdigest()[:8]}"
+    return re.sub(r"((?:assets|shared)/[\w./-]+\.(?:js|css))(?:\?v=\w+)?", doi, html)
 
 
 def kiem_tra_dau_ra(thu_muc):
@@ -206,13 +236,15 @@ def main():
             if not os.path.isfile(idx):
                 print(f"Bỏ qua {thu_muc}: chưa có bản dựng app tra cứu (chạy python build.py đầy đủ trước).")
                 continue
+            for f in SHARED_FILES:   # lớp bảo vệ shared/ nằm trong repo: chép lại để sửa shared/ không cần dựng đầy đủ
+                shutil.copy2(os.path.join(SHARED, f), os.path.join(thu_muc, "shared", f))
             html = open(idx, encoding="utf-8", newline="").read()
             csp = CSP_ADMIN if vai_tro == "admin" else CSP
             html = re.sub(r'(<meta http-equiv="Content-Security-Policy" content=")[^"]*(")', lambda m: m.group(1) + csp + m.group(2), html, count=1)
             with open(idx, "w", encoding="utf-8", newline="") as fh:
-                fh.write(gan_dien_gia(html, thu_muc, vai_tro))
+                fh.write(gan_phien_ban(gan_dien_gia(html, thu_muc, vai_tro), thu_muc))
             kiem_tra_dau_ra(thu_muc)
-            print(f"✓ Ghép module Điền giá BOQ → {thu_muc}")
+            print(f"✓ Ghép module Điền giá BOQ + shared/ → {thu_muc}")
         return
     if not os.path.isdir(WEB):
         sys.exit(f"Không thấy {WEB}. Cần thư mục 3_WEB_OFFLINE của dự án để lấy giao diện.")
